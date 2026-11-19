@@ -6,8 +6,6 @@ Permite capturar el audio del sistema mediante **WASAPI loopback**, el **micróf
 
 ![Captura de pantalla de LocalScribe](docs/screenshot.png)
 
-> _Espacio reservado para la captura de pantalla de la aplicación (`docs/screenshot.png`)._
-
 ---
 
 ## Características principales
