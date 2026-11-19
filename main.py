@@ -1,4 +1,4 @@
-"""Punto de entrada de LocalScribe."""
+"""Application entry point for LocalScribe."""
 
 import sys
 

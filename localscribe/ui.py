@@ -1,4 +1,4 @@
-"""Ventana principal de LocalScribe: historial estable, scroll inteligente y exportación."""
+"""LocalScribe main window: stable history, smart scroll, and multi-format export."""
 
 from __future__ import annotations
 
@@ -33,16 +33,16 @@ from .transcript import RecentTranscript, TranscriptEntry, export_transcript
 logger = logging.getLogger(__name__)
 
 AUDIO_SOURCE_HINTS = {
-    AUDIO_SOURCE_SYSTEM: "Audio: salida predeterminada del sistema (WASAPI)",
-    AUDIO_SOURCE_MIC: "Audio: micrófono predeterminado",
-    AUDIO_SOURCE_BOTH: "Audio: sistema (WASAPI) + micrófono predeterminado",
+    AUDIO_SOURCE_SYSTEM: "Audio: default system output (WASAPI)",
+    AUDIO_SOURCE_MIC: "Audio: default microphone",
+    AUDIO_SOURCE_BOTH: "Audio: system (WASAPI) + default microphone",
 }
 
-EXPORT_FILTERS = "Texto plano (*.txt);;Markdown (*.md);;Subtítulos SRT (*.srt)"
+EXPORT_FILTERS = "Plain text (*.txt);;Markdown (*.md);;SRT Subtitles (*.srt)"
 
 
 class SafeTranscript(QPlainTextEdit):
-    """Nunca salta al final mientras se lee o se selecciona texto anterior."""
+    """Never jumps to the bottom while reading or selecting earlier text."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -50,7 +50,7 @@ class SafeTranscript(QPlainTextEdit):
         self.setReadOnly(True)
         self.setCenterOnScroll(False)
         self.setUndoRedoEnabled(False)
-        self.setPlaceholderText("Acá quedará guardada toda la conversación...")
+        self.setPlaceholderText("Confirmed transcript history will appear here...")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -73,8 +73,8 @@ class SafeTranscript(QPlainTextEdit):
             and not self._mouse_selecting
         )
 
-        # No se usa setPlainText: sobrescribiría todo el documento y destruiría
-        # las selecciones, los cursores y la posición de lectura.
+        # Avoid setPlainText: it would overwrite the document and wipe active
+        # selections, cursor anchors, and scroll position.
         anchor, position = old_cursor.anchor(), old_cursor.position()
         writer = QTextCursor(self.document())
         writer.movePosition(QTextCursor.MoveOperation.End)
@@ -94,7 +94,7 @@ class SafeTranscript(QPlainTextEdit):
 
 
 class ProtectedLive(QPlainTextEdit):
-    """Retiene actualizaciones provisionales mientras el usuario copia texto."""
+    """Defers provisional draft updates while the user selects text to copy."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -146,9 +146,9 @@ class MainWindow(QMainWindow):
         sessions_dir: Path | None = None,
     ):
         super().__init__()
-        self.setWindowTitle("LocalScribe — Transcriptor en vivo")
-        self.resize(760, 640)
-        self.setMinimumSize(520, 420)
+        self.setWindowTitle("LocalScribe — Live Transcriber")
+        self.resize(780, 640)
+        self.setMinimumSize(540, 420)
         self.config_path = (
             config_path if config_path is not None else DEFAULT_CONFIG_PATH
         )
@@ -178,7 +178,7 @@ class MainWindow(QMainWindow):
         self.metrics_timer.setInterval(1000)
         self.metrics_timer.timeout.connect(self._refresh_metrics)
         self.metrics_timer.start()
-        self._set_status("Listo. Elegí la fuente de audio y presioná Iniciar.")
+        self._set_status("Ready. Select an audio source and click Start.")
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -191,37 +191,33 @@ class MainWindow(QMainWindow):
         title = QLabel("LOCALSCRIBE")
         title.setObjectName("title")
         header.addWidget(title, stretch=1)
-        self.pin_button = QPushButton("📌 Siempre visible")
+        self.pin_button = QPushButton("📌 Always on top")
         self.pin_button.setCheckable(True)
-        self.pin_button.setToolTip("Mantener esta ventana por encima de otras ventanas")
+        self.pin_button.setToolTip("Keep this window above other desktop windows")
         self.pin_button.toggled.connect(self._toggle_topmost)
         header.addWidget(self.pin_button)
         layout.addLayout(header)
 
         controls = QHBoxLayout()
-        self.start_button = QPushButton("▶ Iniciar")
+        self.start_button = QPushButton("▶ Start")
         self.start_button.setObjectName("start")
         self.start_button.clicked.connect(self.start_or_stop)
         controls.addWidget(self.start_button)
 
         self.audio_source = QComboBox()
-        self.audio_source.addItem("Audio del sistema (WASAPI)", AUDIO_SOURCE_SYSTEM)
-        self.audio_source.addItem("Micrófono", AUDIO_SOURCE_MIC)
-        self.audio_source.addItem("Ambos (Sistema + Micrófono)", AUDIO_SOURCE_BOTH)
-        self.audio_source.setToolTip(
-            "Seleccioná la fuente de entrada de audio para la sesión"
-        )
+        self.audio_source.addItem("System Audio (WASAPI)", AUDIO_SOURCE_SYSTEM)
+        self.audio_source.addItem("Microphone", AUDIO_SOURCE_MIC)
+        self.audio_source.addItem("Both (System + Microphone)", AUDIO_SOURCE_BOTH)
+        self.audio_source.setToolTip("Choose the audio input source for this session")
         self.audio_source.currentIndexChanged.connect(self._on_audio_source_changed)
         controls.addWidget(self.audio_source)
 
         self.model = QComboBox()
-        self.model.addItem("Rápido (tiny)", "tiny")
-        self.model.addItem("Equilibrado (base)", "base")
-        self.model.addItem("Preciso, más lento (small)", "small")
+        self.model.addItem("Fast (tiny)", "tiny")
+        self.model.addItem("Balanced (base)", "base")
+        self.model.addItem("Accurate, slower (small)", "small")
         self.model.setCurrentIndex(1)
-        self.model.setToolTip(
-            "El modelo se descarga una vez y se reutiliza sin conexión"
-        )
+        self.model.setToolTip("Downloaded once and reused offline")
         controls.addWidget(self.model)
 
         self.threshold = QDoubleSpinBox()
@@ -229,10 +225,10 @@ class MainWindow(QMainWindow):
         self.threshold.setDecimals(3)
         self.threshold.setSingleStep(0.002)
         self.threshold.setValue(0.007)
-        self.threshold.setPrefix("Umbral ")
+        self.threshold.setPrefix("Threshold ")
         self.threshold.setToolTip(
-            "Sensibilidad del detector de sonido; bajar si no detecta voces, "
-            "subir si activa fragmentos en silencio."
+            "Voice activity sensitivity; lower if speech is missed, "
+            "raise if background noise triggers segments."
         )
         controls.addWidget(self.threshold)
         layout.addLayout(controls)
@@ -240,10 +236,10 @@ class MainWindow(QMainWindow):
         self.vocabulary = QLineEdit()
         self.vocabulary.setMaxLength(600)
         self.vocabulary.setPlaceholderText(
-            "Vocabulario opcional: Docker, Kubernetes, FastAPI, PyTorch..."
+            "Optional vocabulary: Docker, Kubernetes, FastAPI, PyTorch..."
         )
         self.vocabulary.setToolTip(
-            "Contexto para Whisper; puede sesgar el reconocimiento. Opcional."
+            "Context hint for Whisper (initial_prompt); optional."
         )
         layout.addWidget(self.vocabulary)
 
@@ -251,47 +247,47 @@ class MainWindow(QMainWindow):
         self.device_label.setObjectName("hint")
         layout.addWidget(self.device_label)
 
-        layout.addWidget(QLabel("Historial confirmado (seleccionable y permanente)"))
+        layout.addWidget(QLabel("Confirmed History (selectable and persistent)"))
         self.transcript = SafeTranscript()
         self.transcript.setFont(QFont("Segoe UI", 11))
         layout.addWidget(self.transcript, stretch=1)
 
         nav = QHBoxLayout()
-        self.jump_button = QPushButton("↓ Ir al presente")
+        self.jump_button = QPushButton("↓ Jump to latest")
         self.jump_button.clicked.connect(self.transcript.go_to_latest)
         nav.addWidget(self.jump_button)
         nav.addStretch()
-        self.copy_selected = QPushButton("Copiar selección")
+        self.copy_selected = QPushButton("Copy selection")
         self.copy_selected.clicked.connect(self._copy_selection)
         nav.addWidget(self.copy_selected)
-        self.copy_latest = QPushButton("Copiar último bloque")
+        self.copy_latest = QPushButton("Copy last block")
         self.copy_latest.clicked.connect(self._copy_last)
         nav.addWidget(self.copy_latest)
         layout.addLayout(nav)
 
-        layout.addWidget(QLabel("En vivo · borrador provisional (puede corregirse)"))
+        layout.addWidget(QLabel("Live · provisional draft (may be revised)"))
         self.live = ProtectedLive()
         self.live.setReadOnly(True)
         self.live.setMaximumHeight(95)
         self.live.setMinimumHeight(64)
-        self.live.setPlaceholderText("Acá van apareciendo las palabras detectadas...")
+        self.live.setPlaceholderText("Live speech hypothesis will appear here...")
         self.live.setFont(QFont("Segoe UI", 10))
         self.live.setObjectName("live")
         layout.addWidget(self.live)
 
         copy_live = QHBoxLayout()
-        self.copy_draft = QPushButton("Copiar borrador actual")
+        self.copy_draft = QPushButton("Copy current draft")
         self.copy_draft.clicked.connect(self._copy_draft)
         copy_live.addWidget(self.copy_draft)
-        self.copy_recent = QPushButton("Copiar intervención reciente")
+        self.copy_recent = QPushButton("Copy recent utterance")
         self.copy_recent.clicked.connect(self._copy_recent)
         copy_live.addWidget(self.copy_recent)
         layout.addLayout(copy_live)
 
-        self.diagnostics_button = QPushButton("Mostrar diagnóstico")
+        self.diagnostics_button = QPushButton("Show diagnostics")
         self.diagnostics_button.setCheckable(True)
         layout.addWidget(self.diagnostics_button)
-        self.diagnostics = QLabel("Esperando mediciones de reconocimiento…")
+        self.diagnostics = QLabel("Waiting for speech recognition metrics…")
         self.diagnostics.setWordWrap(True)
         self.diagnostics.hide()
         self.diagnostics_button.toggled.connect(self.diagnostics.setVisible)
@@ -299,16 +295,14 @@ class MainWindow(QMainWindow):
 
         bottom = QHBoxLayout()
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Buscar en el historial...")
+        self.search.setPlaceholderText("Search history...")
         self.search.returnPressed.connect(self._find_next)
         bottom.addWidget(self.search, stretch=1)
-        search_button = QPushButton("Buscar")
+        search_button = QPushButton("Search")
         search_button.clicked.connect(self._find_next)
         bottom.addWidget(search_button)
-        self.export_button = QPushButton("Exportar...")
-        self.export_button.setToolTip(
-            "Exportar el historial confirmado en formato .txt, .md o .srt"
-        )
+        self.export_button = QPushButton("Export...")
+        self.export_button.setToolTip("Export confirmed history as .txt, .md, or .srt")
         self.export_button.clicked.connect(self._export)
         bottom.addWidget(self.export_button)
         layout.addLayout(bottom)
@@ -380,7 +374,7 @@ class MainWindow(QMainWindow):
         try:
             save_config(self.current_config(), self.config_path)
         except OSError as exc:
-            logger.warning("No se pudo guardar config.json: %s", exc)
+            logger.warning("Could not save config.json: %s", exc)
 
     def _on_audio_source_changed(self) -> None:
         if self.is_recording:
@@ -401,7 +395,7 @@ class MainWindow(QMainWindow):
             self.show()
             self.setGeometry(geometry)
         self.pin_button.setText(
-            "📌 Siempre visible: SÍ" if enabled else "📌 Siempre visible"
+            "📌 Always on top: ON" if enabled else "📌 Always on top"
         )
 
     def start_or_stop(self) -> None:
@@ -423,7 +417,7 @@ class MainWindow(QMainWindow):
         self.signals.finished.connect(self._on_finished)
         self.signals.metrics.connect(self._on_metrics)
 
-        # Cada sesión reinicia los IDs; el historial se conserva entre sesiones.
+        # Each session resets segment IDs while keeping confirmed history intact.
         self.last_completed_id = 0
         self.latest_partial_id = 0
         self.recent = RecentTranscript()
@@ -444,8 +438,8 @@ class MainWindow(QMainWindow):
         self.threshold.setEnabled(False)
         self.vocabulary.setEnabled(False)
         self.is_recording = True
-        self.start_button.setText("■ Detener")
-        self._set_status("Iniciando captura de sonido...")
+        self.start_button.setText("■ Stop")
+        self._set_status("Starting audio capture...")
         self.live.update_text("")
         self._last_error = None
         self.session.start()
@@ -456,16 +450,15 @@ class MainWindow(QMainWindow):
         self.is_stopping = True
         self.is_recording = False
         self.start_button.setEnabled(False)
-        self.start_button.setText("Terminando...")
-        self._set_status("Terminando la captura y procesando los últimos fragmentos...")
+        self.start_button.setText("Stopping...")
+        self._set_status("Stopping capture and processing remaining segments...")
         self.session.stop()
 
     def _on_partial(self, number: int, content: str, group: int = 0) -> None:
         if not self.recent.partial(number, content, group):
             return
         self.latest_partial_id = number
-        # El borrador se actualiza separado del historial: es imposible
-        # invalidar una selección mientras el modelo corrige palabras.
+        # Drafts live in a separate panel so live revisions never break history selection.
         self.live.update_text(content)
 
     def _on_final(self, number: int, content: str, when: str, group: int = 0) -> None:
@@ -516,7 +509,7 @@ class MainWindow(QMainWindow):
         self.is_recording = False
         self.is_stopping = False
         self.start_button.setEnabled(True)
-        self.start_button.setText("▶ Iniciar")
+        self.start_button.setText("▶ Start")
         self.audio_source.setEnabled(True)
         self.model.setEnabled(True)
         self.threshold.setEnabled(True)
@@ -525,24 +518,22 @@ class MainWindow(QMainWindow):
         if not self._closing:
             self._set_status(
                 self._last_error
-                or "Detenido. El historial sigue disponible para copiar o exportar."
+                or "Stopped. Confirmed history remains available to copy or export."
             )
         self.session = None
 
     def _copy_draft(self) -> None:
         if self.recent.draft:
             QApplication.clipboard().setText(self.recent.draft)
-            self._set_status("Borrador copiado; puede contener palabras provisionales.")
+            self._set_status("Draft copied; wording may still be revised.")
         else:
-            self._set_status("Todavía no hay borrador disponible.")
+            self._set_status("No live draft available yet.")
 
     def _copy_recent(self) -> None:
         text = self.recent.recent()
         if text:
             QApplication.clipboard().setText(text)
-            self._set_status(
-                "Intervención reciente copiada (incluye el borrador si existe)."
-            )
+            self._set_status("Recent utterance copied (includes active draft if any).")
 
     def _on_metrics(self, metrics: dict) -> None:
         self.latest_metrics = metrics
@@ -555,7 +546,7 @@ class MainWindow(QMainWindow):
                     + self.session.engine.capture_pending
                 )
                 self.diagnostics.setText(
-                    f"Esperando primera inferencia · Pendiente ≈{pending:.1f}s"
+                    f"Waiting for first inference · Pending ≈{pending:.1f}s"
                 )
             return
         m = self.latest_metrics
@@ -565,32 +556,32 @@ class MainWindow(QMainWindow):
                 self.session.engine.pending_seconds()
                 + self.session.engine.capture_pending
             )
-        warning = " · ATRASO: probá tiny" if m["rtf"] > 1 or pending > 16 else ""
+        warning = " · BACKLOG: try tiny" if m["rtf"] > 1 or pending > 16 else ""
         running = ""
         started = self.session.engine.inference_started if self.session else None
         if started is not None:
-            running = f" · Inferencia en curso: {monotonic() - started:.1f}s"
+            running = f" · Active inference: {monotonic() - started:.1f}s"
         self.diagnostics.setText(
-            f"{m['kind']}: inferencia {m['inference']:.2f}s / audio {m['audio']:.2f}s "
-            f"· RTF {m['rtf']:.2f} (medidos)\n"
-            f"Edad del último audio al emitir: {m['lag']:.2f}s · "
-            f"Pendiente ≈{pending:.1f}s{running}{warning}"
+            f"{m['kind']}: inference {m['inference']:.2f}s / audio {m['audio']:.2f}s "
+            f"· RTF {m['rtf']:.2f} (measured)\n"
+            f"Latest audio age at emit: {m['lag']:.2f}s · "
+            f"Pending ≈{pending:.1f}s{running}{warning}"
         )
 
     def _copy_selection(self) -> None:
         content = self.transcript.textCursor().selectedText().replace("\u2029", "\n")
         if content:
             QApplication.clipboard().setText(content)
-            self._set_status("Selección copiada.")
+            self._set_status("Selection copied.")
         else:
-            self._set_status("Seleccioná primero el texto que querés copiar.")
+            self._set_status("Select some text first to copy.")
 
     def _copy_last(self) -> None:
         if self.last_block:
             QApplication.clipboard().setText(self.last_block)
-            self._set_status("Última intervención copiada.")
+            self._set_status("Last confirmed block copied.")
         else:
-            self._set_status("Todavía no hay una intervención confirmada.")
+            self._set_status("No confirmed block available yet.")
 
     def _find_next(self) -> None:
         query = self.search.text().strip()
@@ -601,9 +592,9 @@ class MainWindow(QMainWindow):
             cursor.movePosition(QTextCursor.MoveOperation.Start)
             self.transcript.setTextCursor(cursor)
             if not self.transcript.find(query):
-                self._set_status(f"No se encontró: {query}")
+                self._set_status(f"Not found: {query}")
                 return
-        self._set_status("Resultado encontrado; el scroll queda bajo tu control.")
+        self._set_status("Match found; scrolling remains under your control.")
 
     @staticmethod
     def _resolve_export_target(filename: str, selected_filter: str) -> tuple[Path, str]:
@@ -619,12 +610,12 @@ class MainWindow(QMainWindow):
 
     def _export(self) -> None:
         if not self.entries:
-            self._set_status("No hay contenido confirmado para exportar.")
+            self._set_status("No confirmed content to export.")
             return
         proposed = f"localscribe_{datetime.now():%Y%m%d_%H%M%S}.txt"
         filename, selected_filter = QFileDialog.getSaveFileName(
             self,
-            "Exportar transcripción",
+            "Export Transcript",
             str(Path.home() / proposed),
             EXPORT_FILTERS,
         )
@@ -633,17 +624,17 @@ class MainWindow(QMainWindow):
             try:
                 export_transcript(self.entries, target, fmt=fmt)
             except (OSError, ValueError) as exc:
-                QMessageBox.warning(self, "Error al exportar", str(exc))
+                QMessageBox.warning(self, "Export Error", str(exc))
                 return
-            self._set_status(f"Transcripción exportada correctamente (.{fmt}).")
+            self._set_status(f"Transcript exported successfully (.{fmt}).")
 
     def closeEvent(self, event) -> None:
         self._save_current_config()
         if self.session is not None:
-            # Los procesos terminan y se vacían sus colas antes de permitir cerrar.
+            # Wait for worker threads to drain queued audio before closing.
             self._closing = True
             self._stop()
-            self._set_status("Procesando lo pendiente. Cerrá otra vez al finalizar.")
+            self._set_status("Finishing pending audio. Close again once stopped.")
             event.ignore()
             return
         event.accept()

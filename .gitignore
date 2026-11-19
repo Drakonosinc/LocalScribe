@@ -1,9 +1,9 @@
-# Entornos virtuales
+# Virtual environments
 .venv/
 venv/
 env/
 
-# Cachés y compilados de Python
+# Python caches and build artifacts
 __pycache__/
 *.py[cod]
 *$py.class
@@ -14,21 +14,21 @@ dist/
 *.egg-info/
 .eggs/
 
-# Herramientas de calidad y pruebas
+# Quality and test tool caches
 .ruff_cache/
 .pytest_cache/
 .coverage
 htmlcov/
 .mypy_cache/
 
-# Datos locales de ejecución de LocalScribe
+# LocalScribe local runtime data
 logs/
 sessions/
 backups/
 config.json
 *.log
 
-# Archivos temporales del sistema (Windows / macOS / editores)
+# OS and editor temporary files (Windows / macOS / IDEs)
 Thumbs.db
 ehthumbs.db
 Desktop.ini

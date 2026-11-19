@@ -1,4 +1,4 @@
-"""Coordinación de captura, segmentación, reconocimiento y respaldo incremental."""
+"""Session coordination for capture, segmentation, recognition, and backups."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ class Signals(QObject):
 
 
 class SessionBackupWriter:
-    """Vuelca incrementalmente cada bloque confirmado en un archivo bajo sessions/."""
+    """Incrementally flushes each confirmed block into a file under sessions/."""
 
     def __init__(
         self,
@@ -46,7 +46,7 @@ class SessionBackupWriter:
 
     def _resolve_path(self) -> Path:
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
-        base = f"sesion_{self.started_at:%Y%m%d_%H%M%S}"
+        base = f"session_{self.started_at:%Y%m%d_%H%M%S}"
         candidate = self.sessions_dir / f"{base}.txt"
         suffix = 1
         while candidate.exists():
@@ -55,7 +55,7 @@ class SessionBackupWriter:
         return candidate
 
     def append(self, timestamp: str, text: str) -> Path | None:
-        """Agrega un bloque confirmado y sincroniza inmediatamente a disco."""
+        """Append a confirmed block and immediately sync it to disk."""
         cleaned = text.strip()
         if not cleaned:
             return self.file_path
@@ -111,7 +111,7 @@ class Session:
             self.backup.append(timestamp, text)
         except OSError as exc:
             self.signals.warning.emit(
-                f"No se pudo guardar el respaldo incremental de sesión: {exc}"
+                f"Could not write incremental session backup: {exc}"
             )
 
     def start(self) -> None:
@@ -121,7 +121,7 @@ class Session:
                 folder = Path(__file__).resolve().parent.parent / "logs"
                 folder.mkdir(exist_ok=True)
                 handler = RotatingFileHandler(
-                    folder / "diagnostico.log",
+                    folder / "diagnostics.log",
                     maxBytes=1_000_000,
                     backupCount=2,
                     encoding="utf-8",
@@ -132,9 +132,7 @@ class Session:
                 logger.addHandler(handler)
                 logger.setLevel(logging.INFO)
             except OSError as exc:
-                self.signals.warning.emit(
-                    f"No se pudo abrir el registro de diagnóstico: {exc}"
-                )
+                self.signals.warning.emit(f"Could not open diagnostic log file: {exc}")
         self.engine.start()
         self.segmenter.start()
         self.capture.start()

@@ -1,4 +1,4 @@
-"""Regresiones de concurrencia, copia y widgets Qt sin capturar audio real."""
+"""Concurrency, copy state, and Qt widget regression tests without real audio capture."""
 
 import os
 import tempfile
@@ -42,26 +42,26 @@ def signals():
 class CopyTests(unittest.TestCase):
     def test_partial_replaced_by_final_and_continuation_combined(self):
         state = RecentTranscript()
-        state.partial(1, "palabra incorrecta", 1)
-        state.final(1, "palabra correcta", 1)
-        state.partial(2, "y continuación", 1)
-        self.assertEqual(state.recent(), "palabra correcta y continuación")
-        state.final(2, "y continuación corregida", 1)
-        self.assertEqual(state.recent(), "palabra correcta y continuación corregida")
-        self.assertFalse(state.partial(1, "viejo", 1))
-        self.assertFalse(state.final(2, "duplicado", 1))
+        state.partial(1, "wrong word", 1)
+        state.final(1, "correct word", 1)
+        state.partial(2, "and continuation", 1)
+        self.assertEqual(state.recent(), "correct word and continuation")
+        state.final(2, "and revised continuation", 1)
+        self.assertEqual(state.recent(), "correct word and revised continuation")
+        self.assertFalse(state.partial(1, "stale", 1))
+        self.assertFalse(state.final(2, "duplicate", 1))
 
     def test_new_pause_group_does_not_copy_previous_question(self):
         state = RecentTranscript()
-        state.final(1, "anterior", 1)
-        state.partial(2, "pregunta actual", 2)
-        self.assertEqual(state.recent(), "pregunta actual")
+        state.final(1, "previous", 1)
+        state.partial(2, "current question", 2)
+        self.assertEqual(state.recent(), "current question")
 
     def test_late_final_does_not_erase_newer_draft(self):
         state = RecentTranscript()
-        state.partial(2, "actual", 2)
-        state.final(1, "anterior", 1)
-        self.assertEqual(state.recent(), "actual")
+        state.partial(2, "current", 2)
+        state.final(1, "previous", 1)
+        self.assertEqual(state.recent(), "current")
 
 
 class EngineTests(unittest.TestCase):
@@ -85,7 +85,7 @@ class EngineTests(unittest.TestCase):
             def transcribe(self, samples, **kwargs):
                 def results():
                     calls.append(kwargs)
-                    yield SimpleNamespace(text=" texto ")
+                    yield SimpleNamespace(text=" sample text ")
 
                 return results(), None
 
@@ -99,7 +99,7 @@ class EngineTests(unittest.TestCase):
             engine.join(5)
         self.assertFalse(engine.is_alive())
         self.assertFalse(output.error.values)
-        self.assertEqual(output.final.values, [(1, "texto", "12:00", 1)])
+        self.assertEqual(output.final.values, [(1, "sample text", "12:00", 1)])
         self.assertEqual(calls[1]["initial_prompt"], "Kubernetes")
         self.assertEqual(output.metrics.values[0][0]["audio"], 1)
 
@@ -114,7 +114,7 @@ class EngineTests(unittest.TestCase):
                 def results():
                     entered.set()
                     release.wait(3)
-                    yield SimpleNamespace(text="texto")
+                    yield SimpleNamespace(text="sample")
 
                 return results(), None
 
@@ -222,7 +222,7 @@ class WidgetTests(unittest.TestCase):
         widget.resize(400, 180)
         widget.show()
         for i in range(70):
-            widget.add_entry(f"Pregunta {i}")
+            widget.add_entry(f"Question {i}")
         self.app.processEvents()
         bar = widget.verticalScrollBar()
         self.assertEqual(bar.value(), bar.maximum())
@@ -233,40 +233,40 @@ class WidgetTests(unittest.TestCase):
         widget.setTextCursor(cursor)
         bar.setValue(10)
         selected = widget.textCursor().selectedText()
-        widget.add_entry("Nuevo texto")
+        widget.add_entry("New text")
         self.app.processEvents()
         self.assertEqual(bar.value(), 10)
         self.assertEqual(widget.textCursor().selectedText(), selected)
         cursor.clearSelection()
         widget.setTextCursor(cursor)
         bar.setValue(bar.maximum())
-        widget.add_entry("Otra actualización")
+        widget.add_entry("Another update")
         self.assertEqual(bar.value(), bar.maximum())
         widget.close()
 
     def test_draft_selection_is_frozen_until_released(self):
         widget = ProtectedLive()
-        widget.update_text("borrador anterior")
+        widget.update_text("previous draft")
         widget.selectAll()
-        widget.update_text("borrador corregido")
-        self.assertEqual(widget.textCursor().selectedText(), "borrador anterior")
-        self.assertEqual(widget.latest_text, "borrador corregido")
+        widget.update_text("revised draft")
+        self.assertEqual(widget.textCursor().selectedText(), "previous draft")
+        self.assertEqual(widget.latest_text, "revised draft")
         cursor = widget.textCursor()
         cursor.clearSelection()
         widget.setTextCursor(cursor)
-        self.assertEqual(widget.toPlainText(), "borrador corregido")
+        self.assertEqual(widget.toPlainText(), "revised draft")
 
     def test_mouse_selection_prevents_follow_even_without_selected_text(self):
         widget = SafeTranscript()
         widget.resize(400, 180)
         widget.show()
         for _ in range(50):
-            widget.add_entry("texto")
+            widget.add_entry("sample")
         self.app.processEvents()
         bar = widget.verticalScrollBar()
         position = bar.value()
         widget._mouse_selecting = True
-        widget.add_entry("nuevo")
+        widget.add_entry("new")
         self.assertEqual(bar.value(), position)
         self.assertLess(bar.value(), bar.maximum())
         widget.close()
@@ -274,33 +274,33 @@ class WidgetTests(unittest.TestCase):
     def test_copy_buttons_and_final_transition(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
             window = MainWindow(config_path=Path(folder) / "config.json")
-            window._on_partial(1, "pregunta provisional", 1)
+            window._on_partial(1, "provisional question", 1)
             window._copy_draft()
-            self.assertEqual(self.app.clipboard().text(), "pregunta provisional")
-            window._on_final(1, "pregunta confirmada", "12:00", 1)
-            window._on_partial(2, "continuación", 1)
+            self.assertEqual(self.app.clipboard().text(), "provisional question")
+            window._on_final(1, "confirmed question", "12:00", 1)
+            window._on_partial(2, "continuation", 1)
             window._copy_recent()
             self.assertEqual(
-                self.app.clipboard().text(), "pregunta confirmada continuación"
+                self.app.clipboard().text(), "confirmed question continuation"
             )
-            self.assertEqual(window.live.toPlainText(), "continuación")
+            self.assertEqual(window.live.toPlainText(), "continuation")
             window.close()
 
     def test_search_export_and_topmost_toggle(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent) as folder:
             window = MainWindow(config_path=Path(folder) / "config.json")
-            window._on_final(1, "pregunta guardada", "12:00", 1)
-            window.search.setText("guardada")
+            window._on_final(1, "saved question", "12:00", 1)
+            window.search.setText("saved")
             window._find_next()
-            self.assertEqual(window.transcript.textCursor().selectedText(), "guardada")
-            target = Path(folder) / "transcripcion.txt"
+            self.assertEqual(window.transcript.textCursor().selectedText(), "saved")
+            target = Path(folder) / "transcript.txt"
             with patch(
                 "localscribe.ui.QFileDialog.getSaveFileName",
-                return_value=(str(target), "Texto plano (*.txt)"),
+                return_value=(str(target), "Plain text (*.txt)"),
             ):
                 window._export()
             self.assertEqual(
-                target.read_text(encoding="utf-8"), "[12:00] pregunta guardada\n"
+                target.read_text(encoding="utf-8"), "[12:00] saved question\n"
             )
             from PySide6.QtCore import Qt
 

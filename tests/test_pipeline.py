@@ -1,4 +1,4 @@
-"""Pruebas independientes de Windows y de la interfaz gráfica."""
+"""Headless unit tests independent of Windows audio devices and GUI."""
 
 import queue
 import threading
@@ -45,7 +45,7 @@ class SegmenterTests(unittest.TestCase):
         segmenter = Segmenter(
             queue.Queue(), threading.Event(), threading.Event(), engine, DummySignals()
         )
-        speech = np.full(1600, 0.04, np.float32)  # 100 ms de audio
+        speech = np.full(1600, 0.04, np.float32)  # 100 ms of audio
         silence = np.zeros(1600, np.float32)
         for _ in range(18):
             segmenter.consume(speech)

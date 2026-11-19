@@ -1,4 +1,4 @@
-"""Pruebas unitarias para v0.3.0: config.json, sesiones incrementales, exportación y audio."""
+"""Unit tests for v0.3.0: config.json, incremental sessions, export, and audio."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def _dummy_signals():
     )
 
 
-# --- Persistencia de config.json ---
+# --- config.json persistence ---
 
 
 def test_config_save_and_load_roundtrip(tmp_path: Path):
@@ -80,14 +80,14 @@ def test_config_save_and_load_roundtrip(tmp_path: Path):
 
 
 def test_config_defaults_and_sanitization(tmp_path: Path):
-    missing = tmp_path / "no_existe.json"
+    missing = tmp_path / "missing.json"
     assert load_config(missing) == AppConfig()
 
-    corrupted = tmp_path / "corrupto.json"
-    corrupted.write_text("{invalido", encoding="utf-8")
+    corrupted = tmp_path / "corrupted.json"
+    corrupted.write_text("{invalid", encoding="utf-8")
     assert load_config(corrupted) == AppConfig()
 
-    invalid_values = tmp_path / "invalidos.json"
+    invalid_values = tmp_path / "invalid.json"
     invalid_values.write_text(
         '{"model": "large-v3", "threshold": 5.0, "audio_source": "hdmi", '
         '"always_on_top": "yes", "vocabulary": 123}',
@@ -104,7 +104,7 @@ def test_config_defaults_and_sanitization(tmp_path: Path):
 def test_main_window_persists_and_restores_config(qapp, tmp_path: Path):
     cfg_path = tmp_path / "config.json"
     win1 = MainWindow(config_path=cfg_path, sessions_dir=tmp_path / "sessions")
-    assert win1.windowTitle() == "LocalScribe — Transcriptor en vivo"
+    assert win1.windowTitle() == "LocalScribe — Live Transcriber"
     title_label = win1.findChild(QLabel, "title")
     assert title_label is not None
     assert title_label.text() == "LOCALSCRIBE"
@@ -128,7 +128,7 @@ def test_main_window_persists_and_restores_config(qapp, tmp_path: Path):
     win2.close()
 
 
-# --- Guardado incremental de sesiones ---
+# --- Incremental session backups ---
 
 
 def test_session_backup_writer_flushes_incrementally(tmp_path: Path):
@@ -139,16 +139,16 @@ def test_session_backup_writer_flushes_incrementally(tmp_path: Path):
     assert writer.append("20:30:01", "   ") is None
     assert not sessions_dir.exists()
 
-    first_path = writer.append("20:30:05", "Primer bloque confirmado.")
-    assert first_path == sessions_dir / "sesion_20261119_203000.txt"
+    first_path = writer.append("20:30:05", "First confirmed block.")
+    assert first_path == sessions_dir / "session_20261119_203000.txt"
     assert first_path.read_text(encoding="utf-8") == (
-        "[20:30:05] Primer bloque confirmado.\n"
+        "[20:30:05] First confirmed block.\n"
     )
 
-    second_path = writer.append("20:30:12", "Segundo bloque confirmado.")
+    second_path = writer.append("20:30:12", "Second confirmed block.")
     assert second_path == first_path
     assert first_path.read_text(encoding="utf-8") == (
-        "[20:30:05] Primer bloque confirmado.\n[20:30:12] Segundo bloque confirmado.\n"
+        "[20:30:05] First confirmed block.\n[20:30:12] Second confirmed block.\n"
     )
 
 
@@ -158,13 +158,13 @@ def test_session_backup_writer_avoids_overwriting_same_timestamp(tmp_path: Path)
     writer_a = SessionBackupWriter(sessions_dir=sessions_dir, started_at=started)
     writer_b = SessionBackupWriter(sessions_dir=sessions_dir, started_at=started)
 
-    path_a = writer_a.append("20:30:01", "Sesión A")
-    path_b = writer_b.append("20:30:02", "Sesión B")
+    path_a = writer_a.append("20:30:01", "Session A")
+    path_b = writer_b.append("20:30:02", "Session B")
 
     assert path_a is not None and path_b is not None
     assert path_a != path_b
-    assert path_a.read_text(encoding="utf-8") == "[20:30:01] Sesión A\n"
-    assert path_b.read_text(encoding="utf-8") == "[20:30:02] Sesión B\n"
+    assert path_a.read_text(encoding="utf-8") == "[20:30:01] Session A\n"
+    assert path_b.read_text(encoding="utf-8") == "[20:30:02] Session B\n"
 
 
 def test_recognition_engine_triggers_incremental_backup(tmp_path: Path):
@@ -173,7 +173,7 @@ def test_recognition_engine_triggers_incremental_backup(tmp_path: Path):
             pass
 
         def transcribe(self, samples, **kwargs):
-            return iter([SimpleNamespace(text="bloque persistido")]), None
+            return iter([SimpleNamespace(text="persisted block")]), None
 
     sessions_dir = tmp_path / "sessions"
     writer = SessionBackupWriter(
@@ -194,11 +194,11 @@ def test_recognition_engine_triggers_incremental_backup(tmp_path: Path):
     assert not engine.is_alive()
     assert writer.file_path is not None
     assert (
-        writer.file_path.read_text(encoding="utf-8") == "[21:00:04] bloque persistido\n"
+        writer.file_path.read_text(encoding="utf-8") == "[21:00:04] persisted block\n"
     )
 
 
-# --- Exportación múltiple (.txt, .md, .srt) ---
+# --- Multi-format export (.txt, .md, .srt) ---
 
 
 def test_format_srt_timestamp_precision():
@@ -210,73 +210,72 @@ def test_format_srt_timestamp_precision():
 
 def test_export_txt_markdown_and_srt(tmp_path: Path):
     entries = [
-        TranscriptEntry("12:00:05", "Hola mundo desde LocalScribe.", 0.0, 3.2),
-        TranscriptEntry("12:00:10", "Segunda línea confirmada.", 5.0, 8.75),
+        TranscriptEntry("12:00:05", "Hello world from LocalScribe.", 0.0, 3.2),
+        TranscriptEntry("12:00:10", "Second confirmed line.", 5.0, 8.75),
     ]
     exported_at = datetime(2026, 11, 19, 12, 15, 0)
 
     txt_content = format_txt(entries)
     assert txt_content == (
-        "[12:00:05] Hola mundo desde LocalScribe.\n"
-        "[12:00:10] Segunda línea confirmada.\n"
+        "[12:00:05] Hello world from LocalScribe.\n[12:00:10] Second confirmed line.\n"
     )
 
     md_content = format_markdown(entries, exported_at=exported_at)
-    assert md_content.startswith("# Transcripción — LocalScribe\n")
-    assert "_Exportado el 2026-11-19 12:15:00_" in md_content
-    assert "- **`[12:00:05]`** Hola mundo desde LocalScribe." in md_content
-    assert "- **`[12:00:10]`** Segunda línea confirmada." in md_content
+    assert md_content.startswith("# Transcript — LocalScribe\n")
+    assert "_Exported on 2026-11-19 12:15:00_" in md_content
+    assert "- **`[12:00:05]`** Hello world from LocalScribe." in md_content
+    assert "- **`[12:00:10]`** Second confirmed line." in md_content
 
     srt_content = format_srt(entries)
     assert srt_content == (
         "1\n"
         "00:00:00,000 --> 00:00:03,200\n"
-        "Hola mundo desde LocalScribe.\n\n"
+        "Hello world from LocalScribe.\n\n"
         "2\n"
         "00:00:05,000 --> 00:00:08,750\n"
-        "Segunda línea confirmada.\n"
+        "Second confirmed line.\n"
     )
 
     for ext in ("txt", "md", "srt"):
-        target = tmp_path / f"salida.{ext}"
+        target = tmp_path / f"output.{ext}"
         fmt = export_transcript(entries, target, exported_at=exported_at)
         assert fmt == ext
         assert target.exists()
 
     with pytest.raises(ValueError):
-        export_transcript(entries, tmp_path / "salida.docx")
+        export_transcript(entries, tmp_path / "output.docx")
 
 
 def test_main_window_export_md_and_srt(qapp, tmp_path: Path):
     win = MainWindow(config_path=tmp_path / "config.json")
     win._on_metrics({"kind": "final", "audio": 2.5})
-    win._on_final(1, "Prueba de subtítulos", "14:00:01", 1)
+    win._on_final(1, "Subtitle export test", "14:00:01", 1)
 
-    md_target = tmp_path / "reunion"
+    md_target = tmp_path / "meeting"
     with patch(
         "localscribe.ui.QFileDialog.getSaveFileName",
         return_value=(str(md_target), "Markdown (*.md)"),
     ):
         win._export()
-    md_file = tmp_path / "reunion.md"
+    md_file = tmp_path / "meeting.md"
     assert md_file.exists()
-    assert "**`[14:00:01]`** Prueba de subtítulos" in md_file.read_text(
+    assert "**`[14:00:01]`** Subtitle export test" in md_file.read_text(
         encoding="utf-8"
     )
 
-    srt_target = tmp_path / "reunion.srt"
+    srt_target = tmp_path / "meeting.srt"
     with patch(
         "localscribe.ui.QFileDialog.getSaveFileName",
-        return_value=(str(srt_target), "Subtítulos SRT (*.srt)"),
+        return_value=(str(srt_target), "SRT Subtitles (*.srt)"),
     ):
         win._export()
     srt_text = srt_target.read_text(encoding="utf-8")
     assert "00:00:00,000 --> 00:00:02,500" in srt_text
-    assert "Prueba de subtítulos" in srt_text
+    assert "Subtitle export test" in srt_text
     win.close()
 
 
-# --- Selector y utilidades de audio ---
+# --- Audio utilities and source validation ---
 
 
 def test_audio_helpers_and_source_validation():

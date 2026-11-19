@@ -1,4 +1,4 @@
-"""Segmentación por pausas y reconocimiento en un hilo independiente."""
+"""Pause-based audio segmentation and recognition on a dedicated thread."""
 
 from __future__ import annotations
 
@@ -34,10 +34,10 @@ class RecognitionTask:
 
 
 class RecognitionEngine(threading.Thread):
-    """Usa un único modelo, priorizando fragmentos definitivos.
+    """Runs a single Whisper model while prioritizing confirmed segments.
 
-    Conserva una sola solicitud provisional (la más reciente) para no generar
-    una cola interminable de tareas al transcribir con CPU.
+    Keeps at most one provisional draft request (the latest) so CPU inference
+    never accumulates an unbounded backlog of stale partials.
     """
 
     def __init__(
@@ -47,8 +47,9 @@ class RecognitionEngine(threading.Thread):
         model_name: str,
         initial_prompt: str = "",
         on_final: Callable[[str, str], None] | None = None,
+        language: str | None = None,
     ):
-        super().__init__(name="Reconocimiento", daemon=True)
+        super().__init__(name="Recognizer", daemon=True)
         self.completed = completed
         self.signals = signals
         self.model_name = model_name
@@ -57,6 +58,7 @@ class RecognitionEngine(threading.Thread):
         self.latest_partial: RecognitionTask | None = None
         self.initial_prompt = initial_prompt.strip() or None
         self.on_final = on_final
+        self.language = language
         self.failed = threading.Event()
         self.busy = False
         self.partial_interval = 0.8
@@ -70,7 +72,7 @@ class RecognitionEngine(threading.Thread):
 
     def pending_seconds(self) -> float:
         with self.condition:
-            # El borrador solapa el segmento activo; no se cuenta dos veces.
+            # Drafts overlap the active segment and are not double-counted.
             return sum(task.duration for task in self.finals)
 
     def submit_partial(
@@ -105,8 +107,8 @@ class RecognitionEngine(threading.Thread):
                 > MAX_PENDING_SECONDS
             ):
                 raise RuntimeError(
-                    "La cola superó 128 s: se detiene la captura para limitar memoria. "
-                    "El último segmento no se pudo encolar; probá el modelo tiny."
+                    "Queue exceeded 128s: stopping capture to bound memory usage. "
+                    "The last segment could not be queued; try the tiny model."
                 )
             if self.latest_partial and self.latest_partial.number == number:
                 self.latest_partial = None
@@ -123,12 +125,12 @@ class RecognitionEngine(threading.Thread):
             from faster_whisper import WhisperModel
 
             self.signals.status.emit(
-                "Cargando modelo de voz. La primera ejecución necesita internet..."
+                "Loading speech model. The first run requires an internet connection..."
             )
             model = WhisperModel(
                 self.model_name, device="cpu", compute_type="int8", cpu_threads=6
             )
-            self.signals.status.emit("Modelo listo: transcribiendo audio")
+            self.signals.status.emit("Model ready: transcribing audio")
 
             while True:
                 with self.condition:
@@ -153,13 +155,12 @@ class RecognitionEngine(threading.Thread):
                         continue
                     self.busy = True
 
-                # Los generadores de faster-whisper requieren iteración para
-                # ejecutar realmente la inferencia.
+                # faster-whisper returns a lazy generator; consume it to run inference.
                 started = time.monotonic()
                 self.inference_started = started
                 segments, _ = model.transcribe(
                     task.samples,
-                    language="es",
+                    language=self.language,
                     beam_size=3 if final else 1,
                     condition_on_previous_text=False,
                     vad_filter=False,
@@ -175,7 +176,7 @@ class RecognitionEngine(threading.Thread):
                     self.inference_started = None
                     self.partial_interval = max(0.8, min(4.0, elapsed * 1.25))
                 metrics = {
-                    "kind": "final" if final else "borrador",
+                    "kind": "final" if final else "draft",
                     "inference": elapsed,
                     "audio": task.duration,
                     "rtf": elapsed / task.duration,
@@ -184,7 +185,7 @@ class RecognitionEngine(threading.Thread):
                 }
                 logger.info("ASR id=%s %s", task.number, metrics)
                 if metrics["rtf"] > 1 or metrics["pending"] > 16:
-                    logger.warning("Reconocimiento retrasado: %s", metrics)
+                    logger.warning("Recognition falling behind: %s", metrics)
                 self.signals.metrics.emit(metrics)
                 if final:
                     if content and self.on_final is not None:
@@ -192,17 +193,17 @@ class RecognitionEngine(threading.Thread):
                             self.on_final(task.when, content)
                         except OSError as exc:
                             logger.warning(
-                                "No se pudo guardar el respaldo incremental: %s", exc
+                                "Could not write incremental session backup: %s", exc
                             )
                     self.signals.final.emit(task.number, content, task.when, task.group)
                 else:
-                    # Aunque el final ya esté en cola, este resultado sirve para
-                    # copiar ahora; el final lo reemplazará por su mismo ID.
+                    # Even if the final is already queued, emit the draft so users
+                    # can copy immediately; the final will replace it by ID.
                     self.signals.partial.emit(task.number, content, task.group)
         except Exception as exc:
             self.failed.set()
-            logger.exception("Falló el reconocimiento")
-            self.signals.error.emit(f"Error en el reconocimiento de voz: {exc}")
+            logger.exception("Speech recognition failed")
+            self.signals.error.emit(f"Speech recognition error: {exc}")
         finally:
             with self.condition:
                 self.busy = False
@@ -210,7 +211,7 @@ class RecognitionEngine(threading.Thread):
 
 
 class Segmenter(threading.Thread):
-    """Agrupa audio por pausas y envía fragmentos a la cola ASR."""
+    """Groups incoming audio by silence pauses and submits segments to ASR."""
 
     def __init__(
         self,
@@ -222,7 +223,7 @@ class Segmenter(threading.Thread):
         energy_threshold: float = 0.007,
         producer_done: threading.Event | None = None,
     ):
-        super().__init__(name="Segmentador", daemon=True)
+        super().__init__(name="Segmenter", daemon=True)
         self.audio_queue = audio_queue
         self.capture_stop = capture_stop
         self.completed = completed
@@ -315,7 +316,7 @@ class Segmenter(threading.Thread):
                     self.continuation = True
                     self.pre_roll.clear()
                     self.pre_roll_length = 0
-                    # No repetir el último paquete al comenzar el segmento siguiente.
+                    # Do not repeat the boundary packet in the next segment.
                     return
         self._remember_pre_roll(samples)
 
@@ -338,8 +339,8 @@ class Segmenter(threading.Thread):
                 ):
                     self.capture_stop.set()
                     message = (
-                        "Se acumularon 48 s de audio: se detiene la captura y se procesa "
-                        "lo pendiente. Probá tiny para la próxima sesión."
+                        "48s of audio backlog accumulated: stopping capture and "
+                        "processing queued audio. Try the tiny model next session."
                     )
                     logger.warning(message)
                     self.signals.error.emit(message)
@@ -350,8 +351,8 @@ class Segmenter(threading.Thread):
                 self._finish()
         except Exception as exc:
             self.capture_stop.set()
-            logger.exception("Falló la segmentación")
-            self.signals.error.emit(f"Error al segmentar el audio: {exc}")
+            logger.exception("Audio segmentation failed")
+            self.signals.error.emit(f"Audio segmentation error: {exc}")
         finally:
             self.completed.set()
             with self.engine.condition:

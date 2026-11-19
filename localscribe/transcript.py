@@ -1,4 +1,4 @@
-"""Estado de copia independiente de los widgets y exportación multi-formato."""
+"""Widget-independent copy state and multi-format transcript export."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ SUPPORTED_EXPORT_FORMATS = ("txt", "md", "srt")
 
 @dataclass(frozen=True)
 class TranscriptEntry:
-    """Bloque de transcripción confirmado con metadatos de tiempo."""
+    """Confirmed transcript block with wall-clock and relative timing metadata."""
 
     timestamp: str
     text: str
@@ -21,7 +21,7 @@ class TranscriptEntry:
 
 
 def format_srt_timestamp(seconds: float) -> str:
-    """Formatea segundos como marca de tiempo SubRip (HH:MM:SS,mmm)."""
+    """Format elapsed seconds as a SubRip timestamp (HH:MM:SS,mmm)."""
     total_ms = round(max(0.0, seconds) * 1000)
     hours, rem = divmod(total_ms, 3_600_000)
     minutes, rem = divmod(rem, 60_000)
@@ -35,7 +35,7 @@ def _estimate_duration(text: str) -> float:
 
 
 def format_txt(entries: Sequence[TranscriptEntry]) -> str:
-    """Formatea el historial confirmado como texto plano con marcas de tiempo."""
+    """Format confirmed history as timestamped plain text."""
     lines = [
         f"[{entry.timestamp}] {entry.text}" for entry in entries if entry.text.strip()
     ]
@@ -44,10 +44,10 @@ def format_txt(entries: Sequence[TranscriptEntry]) -> str:
 
 def format_markdown(
     entries: Sequence[TranscriptEntry],
-    title: str = "Transcripción — LocalScribe",
+    title: str = "Transcript — LocalScribe",
     exported_at: datetime | None = None,
 ) -> str:
-    """Formatea el historial confirmado en Markdown con marcas de tiempo."""
+    """Format confirmed history as timestamped Markdown."""
     valid = [entry for entry in entries if entry.text.strip()]
     if not valid:
         return ""
@@ -55,7 +55,7 @@ def format_markdown(
     lines = [
         f"# {title}",
         "",
-        f"_Exportado el {stamp}_",
+        f"_Exported on {stamp}_",
         "",
     ]
     for entry in valid:
@@ -64,7 +64,7 @@ def format_markdown(
 
 
 def format_srt(entries: Sequence[TranscriptEntry]) -> str:
-    """Formatea el historial confirmado en subtítulos estándar SubRip (.srt)."""
+    """Format confirmed history as standard SubRip (.srt) subtitles."""
     valid = [entry for entry in entries if entry.text.strip()]
     if not valid:
         return ""
@@ -91,12 +91,12 @@ def export_transcript(
     fmt: str | None = None,
     exported_at: datetime | None = None,
 ) -> str:
-    """Exporta entradas confirmadas a .txt, .md o .srt en UTF-8."""
+    """Export confirmed entries to .txt, .md, or .srt in UTF-8."""
     resolved_fmt = (fmt or path.suffix.lstrip(".") or "txt").lower()
     if resolved_fmt == "markdown":
         resolved_fmt = "md"
     if resolved_fmt not in SUPPORTED_EXPORT_FORMATS:
-        raise ValueError(f"Formato de exportación no admitido: {resolved_fmt}")
+        raise ValueError(f"Unsupported export format: {resolved_fmt}")
 
     if resolved_fmt == "txt":
         content = format_txt(entries)
@@ -136,7 +136,7 @@ class RecentTranscript:
         if number <= self.completed:
             return False
         self.completed = number
-        # Un final anterior puede llegar mientras ya se muestra otra intervención.
+        # An earlier final can arrive while a newer utterance is already shown.
         if number >= self.partial_id or group == self.group:
             self._group(group)
             if text:
@@ -146,5 +146,5 @@ class RecentTranscript:
         return True
 
     def recent(self) -> str:
-        # Cada segmento tiene audio disjunto: el borrador sustituye solo a su ID.
+        # Each segment covers disjoint audio: a draft replaces only its own ID.
         return " ".join([*self.confirmed, self.draft]).strip()

@@ -1,48 +1,48 @@
 # LocalScribe
 
-**LocalScribe** es una aplicación de escritorio para Windows (Python 3.12 + PySide6) que transcribe audio en vivo de forma **100 % local**, sin enviar grabaciones a la nube ni requerir claves de API.
+**LocalScribe** is a Windows desktop application (Python 3.12 + PySide6) that transcribes live audio **100% locally**, without uploading recordings to the cloud or requiring API keys.
 
-Permite capturar el audio del sistema mediante **WASAPI loopback**, el **micrófono**, o **ambas fuentes en simultáneo**, mostrando un borrador provisional en tiempo real y consolidando cada intervención confirmada en un historial permanente, buscable y exportable.
+It captures **system audio via WASAPI loopback**, your **microphone**, or **both sources simultaneously**, displaying a provisional live draft while consolidating each confirmed utterance into a persistent, searchable, and exportable transcript history.
 
-![Captura de pantalla de LocalScribe](docs/screenshot.png)
-
----
-
-## Características principales
-
-- **Procesamiento 100 % local:** Inferencia en CPU (INT8) con [`faster-whisper`](https://github.com/SYSTRAN/faster-whisper), con perfiles intercambiables (`tiny`, `base`, `small`).
-- **Selector de fuente de audio:** Alterná desde la barra principal entre:
-  - **Audio del sistema (WASAPI):** reuniones (Zoom, Meet, Teams), clases, navegador o videos.
-  - **Micrófono:** captura directa del micrófono predeterminado de Windows.
-  - **Ambos (Sistema + Micrófono):** mezcla simultánea de ambas fuentes en un flujo unificado a 16 kHz.
-- **Historial estable y borrador protegido:**
-  - El texto confirmado se conserva en un panel independiente con marcas de tiempo y **scroll inteligente** (sigue el final automáticamente, pero nunca te mueve si subiste a leer o seleccionás texto).
-  - El panel **En vivo** pospone actualizaciones visuales mientras seleccionás texto para copiar.
-  - Atajos y botones rápidos: *Copiar selección*, *Copiar último bloque*, *Copiar borrador actual*, *Copiar intervención reciente*, búsqueda (`Ctrl+F`) e *Ir al presente* (`Ctrl+L`).
-- **Vocabulario personalizado (`initial_prompt`):** Campo opcional para guiar al modelo con términos técnicos, siglas o nombres propios (por ejemplo: `Docker, Kubernetes, FastAPI, PyTorch...`).
-- **Exportación múltiple:** Guardá el historial confirmado en **`.txt`** (texto plano con marcas de tiempo), **`.md`** (Markdown estructurado) o **`.srt`** (subtítulos estándar SubRip).
-- **Guardado incremental de sesión:** Cada bloque confirmado se vuelca y sincroniza automáticamente en `sessions/sesion_YYYYMMDD_HHMMSS.txt` a medida que se consolida, evitando pérdidas ante un cierre inesperado.
-- **Persistencia de preferencias:** Conserva automáticamente en `config.json` el perfil de modelo, el umbral de silencio, la fuente de audio, el estado de **Siempre visible** y el vocabulario personalizado.
-- **Diagnóstico integrado:** Panel ocultable con métricas en vivo (tiempo de inferencia, duración de audio, RTF, retraso y pendiente) y registro rotativo en `logs/diagnostico.log` sin almacenar contenido de voz ni texto transcripto.
+![LocalScribe Screenshot](docs/screenshot.png)
 
 ---
 
-## Requisitos
+## Key Features
 
-- **Sistema operativo:** Windows 10 u 11 (64 bits).
-- **Python:** Python **3.12** (64 bits) con el lanzador `py` habilitado en el sistema.
-- **Conexión a internet (solo la primera vez):** necesaria para instalar dependencias y descargar los pesos del modelo elegido de `faster-whisper`. Una vez en caché, funciona completamente sin conexión.
+- **100% Local Processing:** Runs CPU inference (INT8) with [`faster-whisper`](https://github.com/SYSTRAN/faster-whisper), supporting switchable model profiles (`tiny`, `base`, `small`) and automatic language detection.
+- **Audio Source Selector:** Switch directly from the control bar between:
+  - **System Audio (WASAPI):** captures meetings (Zoom, Meet, Teams), lectures, browser audio, or videos.
+  - **Microphone:** captures your default Windows microphone.
+  - **Both (System + Microphone):** mixes both streams concurrently into a unified 16 kHz mono pipeline.
+- **Stable History & Protected Live Draft:**
+  - Confirmed text stays in an independent timestamped panel with **smart scrolling** (auto-follows at the bottom, never jumps while reading or selecting earlier text).
+  - The **Live** draft panel defers visual updates while you select text to copy.
+  - Quick actions and shortcuts: *Copy selection*, *Copy last block*, *Copy current draft*, *Copy recent utterance*, search (`Ctrl+F`), and *Jump to latest* (`Ctrl+L`).
+- **Custom Vocabulary (`initial_prompt`):** Optional context field to guide Whisper with technical terms, acronyms, or domain keywords (e.g., `Docker, Kubernetes, FastAPI, PyTorch...`).
+- **Multi-Format Export:** Export confirmed history to **`.txt`** (plain text with timestamps), **`.md`** (structured Markdown), or **`.srt`** (standard SubRip subtitles).
+- **Incremental Session Backup:** Every confirmed block is immediately appended and synced (`fsync`) to `sessions/session_YYYYMMDD_HHMMSS.txt` to prevent transcript loss on unexpected exits.
+- **Persistent Settings:** Automatically saves and restores model profile, silence threshold, audio source, **Always on top** state, and custom vocabulary in `config.json`.
+- **Built-in Diagnostics:** Toggleable panel with live metrics (inference duration, audio duration, RTF, lag, and backlog) plus rotating logs in `logs/diagnostics.log` that never store audio or transcribed text.
 
 ---
 
-## Instalación
+## Requirements
 
-### Opción recomendada (asistente automático)
+- **Operating System:** Windows 10 or 11 (64-bit).
+- **Python:** Python **3.12** (64-bit) with the Windows `py` launcher enabled.
+- **Internet Connection (first run only):** Required to install dependencies and download the chosen `faster-whisper` model weights. Once cached, LocalScribe runs completely offline.
 
-1. Cloná o descargá este repositorio en tu equipo.
-2. Ejecutá **`INSTALAR.bat`** (una sola vez). El script verifica Python 3.12, crea el entorno virtual `.venv` e instala las dependencias de `requirements.txt`.
+---
 
-### Instalación manual (PowerShell)
+## Installation
+
+### Recommended (Automated Setup)
+
+1. Clone or download this repository.
+2. Run **`INSTALL.bat`** once. It verifies Python 3.12, creates the `.venv` virtual environment, and installs all dependencies from `requirements.txt`.
+
+### Manual Installation (PowerShell)
 
 ```powershell
 py -3.12 -m venv .venv
@@ -52,49 +52,51 @@ py -3.12 -m venv .venv
 
 ---
 
-## Ejecución
+## Usage
 
-Hacé doble clic en **`INICIAR.bat`** o ejecutá desde PowerShell:
+Double-click **`START.bat`** or run from PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe main.py
 ```
 
-1. Elegí la **fuente de audio** (*Audio del sistema*, *Micrófono* o *Ambos*).
-2. Seleccioná el **perfil de modelo** (*Rápido `tiny`*, *Equilibrado `base`* o *Preciso `small`*).
-3. Ajustá opcionalmente el **Umbral** de detección de voz y el **Vocabulario opcional**.
-4. Presioná **▶ Iniciar** para comenzar la transcripción.
+1. Choose your **audio source** (*System Audio (WASAPI)*, *Microphone*, or *Both*).
+2. Pick a **model profile** (*Fast `tiny`*, *Balanced `base`*, or *Accurate `small`*).
+3. Optionally adjust the voice detection **Threshold** and **Optional vocabulary**.
+4. Click **▶ Start** to begin live transcription.
 
 ---
 
-## Arquitectura del proyecto
+## Project Structure
 
 ```text
 LocalScribe/
-├── INICIAR.bat              # Lanzador directo en Windows
-├── INSTALAR.bat             # Instalador del entorno virtual (.venv)
-├── main.py                  # Punto de entrada de la aplicación
-├── requirements.txt         # Dependencias de ejecución
-├── ruff.toml                # Configuración del linter/formateador
+├── INSTALL.bat              # Automated Windows virtual environment installer
+├── START.bat                # Windows application launcher
+├── main.py                  # Application entry point
+├── requirements.txt         # Runtime dependencies
+├── ruff.toml                # Linter and formatter configuration
+├── docs/
+│   └── screenshot.png       # Application UI screenshot
 ├── localscribe/
-│   ├── __init__.py          # Metadatos y versión (v0.3.0)
-│   ├── audio.py             # Captura WASAPI loopback, micrófono y mezclador dual
-│   ├── config.py            # Carga y guardado automático de config.json
-│   ├── pipeline.py          # Segmentación por energía/pausas y motor ASR
-│   ├── session.py           # Orquestación de hilos y respaldo incremental en sessions/
-│   ├── transcript.py        # Estado reciente y exportación a .txt, .md y .srt
-│   └── ui.py                # Interfaz gráfica en PySide6
+│   ├── __init__.py          # Package metadata and version (v0.3.0)
+│   ├── audio.py             # WASAPI loopback, microphone, and dual-stream mixer
+│   ├── config.py            # Automatic config.json persistence
+│   ├── pipeline.py          # Energy/pause segmenter and ASR engine
+│   ├── session.py           # Thread orchestration and incremental session backups
+│   ├── transcript.py        # Recent transcript state and .txt/.md/.srt exporters
+│   └── ui.py                # PySide6 desktop interface
 └── tests/
-    ├── test_pipeline.py     # Pruebas de segmentación y cola de inferencia
-    ├── test_v02.py          # Pruebas de concurrencia, copia y widgets Qt
-    └── test_v03.py          # Pruebas de config.json, sesiones, audio y exportación
+    ├── test_pipeline.py     # Segmentation and recognition queue tests
+    ├── test_v02.py          # Concurrency, copy state, and Qt widget regression tests
+    └── test_v03.py          # Config persistence, session backups, export, and audio tests
 ```
 
 ---
 
-## Desarrollo y pruebas
+## Development & Testing
 
-Las pruebas automatizadas se ejecutan sin abrir dispositivos de audio reales ni descargar modelos (usando la plataforma `offscreen` de Qt):
+Automated tests run headlessly using Qt's `offscreen` platform without opening real audio devices or downloading models:
 
 ```powershell
 .\.venv\Scripts\ruff.exe check .
@@ -104,6 +106,6 @@ Las pruebas automatizadas se ejecutan sin abrir dispositivos de audio reales ni 
 
 ---
 
-## Privacidad y uso responsable
+## Privacy & Responsible Use
 
-Todo el audio se procesa localmente en tu computadora y nunca se envía a servidores externos. Los archivos de respaldo incremental (`sessions/`), registros de diagnóstico (`logs/`) y configuración local (`config.json`) permanecen exclusivamente en tu equipo. Al transcribir reuniones o clases, respetá siempre el consentimiento de los participantes y las políticas aplicables.
+All audio processing runs strictly on your machine and is never transmitted to external APIs. Incremental session backups (`sessions/`), diagnostic logs (`logs/`), and local preferences (`config.json`) remain on your device and are excluded from version control via `.gitignore`. Always respect participant consent and institutional policies when transcribing meetings or classes.

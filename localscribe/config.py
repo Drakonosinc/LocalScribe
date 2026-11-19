@@ -1,4 +1,4 @@
-"""Persistencia de configuración de usuario en config.json."""
+"""User configuration persistence in config.json."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AppConfig:
-    """Preferencias persistidas entre sesiones de LocalScribe."""
+    """User preferences persisted across LocalScribe sessions."""
 
     model: str = "base"
     threshold: float = 0.007
@@ -74,15 +74,13 @@ class AppConfig:
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> AppConfig:
-    """Carga AppConfig desde disco; ante errores devuelve valores por defecto."""
+    """Load AppConfig from disk; return defaults if missing or invalid."""
     if not path.exists():
         return AppConfig()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning(
-            "No se pudo leer %s; usando configuración por defecto: %s", path, exc
-        )
+        logger.warning("Could not read %s; using default config: %s", path, exc)
         return AppConfig()
     if not isinstance(data, dict):
         return AppConfig()
@@ -90,7 +88,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> AppConfig:
 
 
 def save_config(config: AppConfig, path: Path = DEFAULT_CONFIG_PATH) -> None:
-    """Guarda AppConfig en JSON UTF-8 con formato legible."""
+    """Save AppConfig as pretty-printed UTF-8 JSON."""
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(config.to_dict(), indent=2, ensure_ascii=False) + "\n"
     path.write_text(payload, encoding="utf-8")

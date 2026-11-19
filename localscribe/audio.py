@@ -1,4 +1,4 @@
-"""Captura de audio en Windows: WASAPI loopback, micrófono o mezcla de ambos."""
+"""Windows audio capture: WASAPI loopback, microphone, or dual-stream mix."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def pcm_to_mono_16k(raw: bytes, channels: int, rate: int) -> np.ndarray:
-    """Convierte PCM int16 intercalado a mono float32 remuestreado a 16 kHz."""
+    """Convert interleaved int16 PCM bytes to mono float32 resampled at 16 kHz."""
     if not raw or channels < 1:
         return np.empty(0, dtype=np.float32)
     pcm = np.frombuffer(raw, dtype=np.int16)
@@ -50,7 +50,7 @@ def mix_audio_chunks(
     system_chunk: np.ndarray | None,
     mic_chunk: np.ndarray | None,
 ) -> np.ndarray:
-    """Mezcla audio del sistema y del micrófono a 16 kHz con recorte suave."""
+    """Mix 16 kHz system and microphone audio chunks with clipping protection."""
     has_sys = system_chunk is not None and system_chunk.size > 0
     has_mic = mic_chunk is not None and mic_chunk.size > 0
     if not has_sys and not has_mic:
@@ -69,9 +69,9 @@ def mix_audio_chunks(
 
 
 class AudioCapture(threading.Thread):
-    """Captura audio de Windows (WASAPI loopback, micrófono o ambos).
+    """Capture Windows audio (WASAPI loopback, microphone, or both).
 
-    La captura corre en un hilo separado y nunca espera al reconocimiento de voz.
+    Runs on a dedicated thread and never blocks waiting on speech recognition.
     """
 
     def __init__(
@@ -82,8 +82,8 @@ class AudioCapture(threading.Thread):
         source: str = AUDIO_SOURCE_SYSTEM,
     ):
         if source not in VALID_AUDIO_SOURCES:
-            raise ValueError(f"Fuente de audio no válida: {source}")
-        super().__init__(name="CapturaAudio", daemon=True)
+            raise ValueError(f"Unsupported audio source: {source}")
+        super().__init__(name="AudioCapture", daemon=True)
         self.audio_queue = audio_queue
         self.stop_event = stop_event
         self.signals = signals
@@ -105,13 +105,13 @@ class AudioCapture(threading.Thread):
         except queue.Full:
             self.dropped_seconds += len(mono) / TARGET_RATE
             logger.warning(
-                "Cola de captura llena; audio descartado acumulado=%.3fs",
+                "Capture queue full; cumulative dropped audio=%.3fs",
                 self.dropped_seconds,
             )
-            # No bloquear la captura ni inundar Qt con avisos.
+            # Never block capture or flood Qt with repeated warnings.
             if not self._full_warning_sent:
                 self.signals.warning.emit(
-                    "El procesamiento se está retrasando: se perdió audio."
+                    "Processing is falling behind: some audio frames were dropped."
                 )
                 self._full_warning_sent = True
 
@@ -121,7 +121,7 @@ class AudioCapture(threading.Thread):
         channels = int(device["maxInputChannels"])
         rate = int(device["defaultSampleRate"])
         if channels < 1 or rate < 8_000:
-            raise RuntimeError("Formato del dispositivo de salida no admitido")
+            raise RuntimeError("Unsupported system output device format")
         return device, channels, rate
 
     @staticmethod
@@ -130,7 +130,7 @@ class AudioCapture(threading.Thread):
         max_channels = int(device["maxInputChannels"])
         rate = int(device["defaultSampleRate"])
         if max_channels < 1 or rate < 8_000:
-            raise RuntimeError("Formato del micrófono predeterminado no admitido")
+            raise RuntimeError("Unsupported default microphone format")
         channels = min(max_channels, 2)
         return device, channels, rate
 
@@ -162,7 +162,7 @@ class AudioCapture(threading.Thread):
         sys_dev, sys_ch, sys_rate = self._system_device(manager)
         mic_dev, mic_ch, mic_rate = self._mic_device(manager)
         self.signals.device.emit(
-            f"Sistema: {sys_dev['name']} + Micrófono: {mic_dev['name']}"
+            f"System: {sys_dev['name']} + Microphone: {mic_dev['name']}"
         )
 
         sys_q: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
@@ -179,7 +179,7 @@ class AudioCapture(threading.Thread):
                     try:
                         target_q.put_nowait(mono)
                     except queue.Full:
-                        # Descartar el paquete más antiguo para evitar bloqueo.
+                        # Drop the oldest chunk so readers never stall.
                         try:
                             target_q.get_nowait()
                         except queue.Empty:
@@ -190,7 +190,7 @@ class AudioCapture(threading.Thread):
                             pass
             except Exception as exc:
                 if not self.stop_event.is_set():
-                    logger.exception("Error en hilo lector de captura dual")
+                    logger.exception("Dual capture reader thread failed")
                     reader_errors.append(exc)
                     self.stop_event.set()
 
@@ -215,13 +215,13 @@ class AudioCapture(threading.Thread):
             sys_thread = threading.Thread(
                 target=read_loop,
                 args=(sys_stream, sys_ch, sys_rate, sys_q),
-                name="LectorSistema",
+                name="SystemReader",
                 daemon=True,
             )
             mic_thread = threading.Thread(
                 target=read_loop,
                 args=(mic_stream, mic_ch, mic_rate, mic_q),
-                name="LectorMicrofono",
+                name="MicReader",
                 daemon=True,
             )
             sys_thread.start()
@@ -277,7 +277,7 @@ class AudioCapture(threading.Thread):
                 if self.source == AUDIO_SOURCE_SYSTEM:
                     dev, channels, rate = self._system_device(manager)
                     self._run_single_stream(
-                        pyaudio, manager, dev, channels, rate, f"Sistema: {dev['name']}"
+                        pyaudio, manager, dev, channels, rate, f"System: {dev['name']}"
                     )
                 elif self.source == AUDIO_SOURCE_MIC:
                     dev, channels, rate = self._mic_device(manager)
@@ -287,13 +287,13 @@ class AudioCapture(threading.Thread):
                         dev,
                         channels,
                         rate,
-                        f"Micrófono: {dev['name']}",
+                        f"Microphone: {dev['name']}",
                     )
                 else:
                     self._run_dual_stream(pyaudio, manager)
         except Exception as exc:
-            logger.exception("Falló la captura de audio (%s)", self.source)
-            self.signals.error.emit(f"No se pudo capturar el audio: {exc}")
+            logger.exception("Audio capture failed (%s)", self.source)
+            self.signals.error.emit(f"Could not capture audio: {exc}")
         finally:
             self.stop_event.set()
             self.finished.set()
