@@ -43,3 +43,5 @@ $RECYCLE.BIN/
 *~
 .vscode/
 .idea/
+
+tests/tmp*/
