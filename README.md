@@ -17,6 +17,8 @@ It captures **system audio via WASAPI loopback**, your **microphone**, or **both
   - **Microphone:** captures your default Windows microphone.
   - **Both (System + Microphone):** mixes both streams concurrently while tagging each utterance with **`🎙 You`** or **`🔊 Them`** based on active channel energy.
 - **Floating Live Captions Overlay (`Ctrl+Shift+O`):** Always-on-top, translucent, draggable subtitle bar that displays live captions over any application, video, or game (scroll wheel adjusts font size).
+- **SQLite Session Library with FTS5 Search (`Ctrl+H`):** Every session is automatically indexed in `%APPDATA%\LocalScribe\library.db` with an auto-generated title, timestamp, and entry count. Search across all past meetings in milliseconds from the collapsible sidebar.
+- **Drag & Drop Media File Transcription (`Ctrl+O`):** Drop any `.mp3`, `.wav`, `.m4a`, `.mp4`, `.mkv`, `.ogg`, `.flac`, or `.webm` file onto the window (or click **`📂`**) to transcribe pre-recorded lectures, meetings, or voice notes locally.
 - **Modern UI 2.0 with Dark & Light Themes:**
   - Animated record button, live input waveform meter, session timer, and collapsible settings drawer (`Ctrl+,`).
   - Confirmed history with **smart scrolling**, floating **`↓ N new`** pill when reading earlier blocks, bookmarks (`★` / `Ctrl+B`), and highlighted search with match counter (`Ctrl+F`).
@@ -79,11 +81,12 @@ LocalScribe/
 ├── docs/
 │   └── screenshot.png       # Application UI screenshot
 ├── localscribe/
-│   ├── __init__.py          # Package metadata and version (v0.4.0)
+│   ├── __init__.py          # Package metadata and version (v0.5.0)
 │   ├── audio.py             # WASAPI loopback, microphone, and dual-stream mixer
 │   ├── config.py            # Per-user config.json persistence (%APPDATA%\LocalScribe)
-│   ├── pipeline.py          # Adaptive segmenter, smart cuts, Silero VAD, and ASR engine
+│   ├── pipeline.py          # Adaptive segmenter, Silero VAD, live & file ASR engines
 │   ├── session.py           # Thread orchestration and incremental session backups
+│   ├── storage.py           # SQLite + FTS5 session library and global search
 │   ├── theme.py             # Dark/Light palettes, stylesheet, and generated app icon
 │   ├── transcript.py        # Transcript state and .txt/.md/.srt/.vtt/.json exporters
 │   ├── ui.py                # PySide6 desktop interface (UI 2.0)

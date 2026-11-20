@@ -12,6 +12,7 @@ from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 
@@ -660,3 +661,130 @@ class Segmenter(threading.Thread):
             self.completed.set()
             with self.engine.condition:
                 self.engine.condition.notify_all()
+
+
+SUPPORTED_MEDIA_EXTENSIONS = (
+    ".wav",
+    ".mp3",
+    ".m4a",
+    ".mp4",
+    ".mkv",
+    ".ogg",
+    ".flac",
+    ".webm",
+    ".aac",
+    ".wma",
+)
+
+
+class FileTranscriptionJob(threading.Thread):
+    """Transcribes an audio/video file locally and emits confirmed blocks."""
+
+    def __init__(
+        self,
+        media_path: Path,
+        signals,
+        model_name: str,
+        initial_prompt: str = "",
+        language: str | None = None,
+        device: str = "auto",
+        on_final: Callable[[str, str], None] | None = None,
+    ):
+        super().__init__(name="FileTranscriber", daemon=True)
+        self.media_path = Path(media_path)
+        self.signals = signals
+        self.model_name = model_name
+        self.initial_prompt = initial_prompt.strip() or None
+        self.language = None if language in (None, "", "auto") else language
+        self.device = device
+        self.on_final = on_final
+        self.cancel_event = threading.Event()
+        self.active_device = "cpu"
+
+    def stop(self) -> None:
+        self.cancel_event.set()
+
+    def _load_model(self):
+        helper = RecognitionEngine(
+            threading.Event(),
+            self.signals,
+            self.model_name,
+            self.initial_prompt or "",
+            language=self.language,
+            device=self.device,
+        )
+        model = helper._load_model()
+        self.active_device = helper.active_device
+        return model
+
+    def run(self) -> None:
+        try:
+            if not self.media_path.exists():
+                raise FileNotFoundError(f"File not found: {self.media_path}")
+            model = self._load_model()
+            self.signals.status.emit(
+                f"Transcribing file '{self.media_path.name}' on {self.active_device.upper()}…"
+            )
+            started = time.monotonic()
+            kwargs = dict(
+                language=self.language,
+                beam_size=3,
+                condition_on_previous_text=True,
+                without_timestamps=False,
+                temperature=0,
+                initial_prompt=self.initial_prompt,
+                vad_filter=True,
+                vad_parameters={
+                    "min_silence_duration_ms": 500,
+                    "speech_pad_ms": 300,
+                },
+            )
+            try:
+                segments, _info = model.transcribe(str(self.media_path), **kwargs)
+                self._consume_segments(segments, started)
+            except Exception as exc:
+                if not kwargs.get("vad_filter"):
+                    raise
+                logger.warning("File VAD filter failed, retrying without VAD: %s", exc)
+                kwargs["vad_filter"] = False
+                kwargs.pop("vad_parameters", None)
+                segments, _info = model.transcribe(str(self.media_path), **kwargs)
+                self._consume_segments(segments, started)
+        except Exception as exc:
+            logger.exception("File transcription failed")
+            self.signals.error.emit(f"File transcription error: {exc}")
+        finally:
+            self.signals.finished.emit()
+
+    def _consume_segments(self, segments: Iterable, started: float) -> None:
+        number = 0
+        for seg in segments:
+            if self.cancel_event.is_set():
+                break
+            text = clean_segments([seg])
+            if not text:
+                continue
+            number += 1
+            start_s = float(getattr(seg, "start", 0.0) or 0.0)
+            end_s = float(getattr(seg, "end", start_s + 1.0) or (start_s + 1.0))
+            mins, secs = divmod(int(max(0.0, start_s)), 60)
+            hrs, mins = divmod(mins, 60)
+            when = f"{hrs:02d}:{mins:02d}:{secs:02d}"
+            if self.on_final is not None:
+                try:
+                    self.on_final(when, text)
+                except OSError as exc:
+                    logger.warning("Could not write file session backup: %s", exc)
+            self.signals.final.emit(number, text, when, 1, start_s, end_s)
+        elapsed = max(0.001, time.monotonic() - started)
+        self.signals.metrics.emit(
+            {
+                "kind": "file",
+                "inference": elapsed,
+                "audio": max(0.1, elapsed),
+                "rtf": 0.0,
+                "lag": 0.0,
+                "pending": 0.0,
+                "device": self.active_device,
+            }
+        )

@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -49,7 +51,9 @@ from .config import (
     load_config,
     save_config,
 )
-from .session import Session, Signals
+from .pipeline import SUPPORTED_MEDIA_EXTENSIONS, FileTranscriptionJob
+from .session import Session, SessionBackupWriter, Signals
+from .storage import SessionLibrary
 from .theme import PALETTES, Palette, app_icon, stylesheet
 from .transcript import RecentTranscript, TranscriptEntry, export_transcript
 from .widgets import (
@@ -79,9 +83,14 @@ EXPORT_FILTERS = (
 EXPORT_SUFFIXES = (".txt", ".md", ".srt", ".vtt", ".json")
 
 EMPTY_STATE = (
-    "Press  ●  (or Ctrl+R) to start listening.\n\n"
+    "Press  ●  (or Ctrl+R) to start listening, or drag & drop an audio/video file.\n\n"
     "Everything is transcribed locally on this computer: no cloud, no API keys.\n"
     "Tip: pick your language below for the best accuracy."
+)
+MEDIA_FILE_FILTER = (
+    "Audio / Video Files ("
+    + " ".join(f"*{ext}" for ext in SUPPORTED_MEDIA_EXTENSIONS)
+    + ");;All Files (*)"
 )
 
 
@@ -99,17 +108,30 @@ class MainWindow(QMainWindow):
         self,
         config_path: Path | None = None,
         sessions_dir: Path | None = None,
+        db_path: Path | None = None,
     ):
         super().__init__()
         self.setWindowTitle("LocalScribe — Live Transcriber")
         self.setWindowIcon(app_icon())
-        self.resize(940, 720)
+        self.setAcceptDrops(True)
+        self.resize(980, 720)
         self.setMinimumSize(640, 520)
         self.config_path = (
             config_path if config_path is not None else DEFAULT_CONFIG_PATH
         )
         self.sessions_dir = sessions_dir
-        self.session: Session | None = None
+        self._resolved_db_path = (
+            db_path
+            if db_path is not None
+            else (
+                self.config_path.parent / "library.db"
+                if config_path is not None
+                else None
+            )
+        )
+        self.library = SessionLibrary(self._resolved_db_path)
+        self.current_session_id: int | None = None
+        self.session: Session | FileTranscriptionJob | None = None
         self.signals: Signals | None = None
         self.last_completed_id = 0
         self.latest_partial_id = 0
@@ -171,7 +193,12 @@ class MainWindow(QMainWindow):
         layout.addLayout(self._build_header())
         self.drawer = self._build_drawer()
         layout.addWidget(self.drawer)
-        layout.addWidget(self._build_transcript_card(), stretch=1)
+        middle = QHBoxLayout()
+        middle.setSpacing(10)
+        self.sidebar = self._build_sidebar()
+        middle.addWidget(self.sidebar)
+        middle.addWidget(self._build_transcript_card(), stretch=1)
+        layout.addLayout(middle, stretch=1)
         layout.addWidget(self._build_live_card())
         layout.addWidget(self._build_control_bar())
         layout.addLayout(self._build_footer())
@@ -209,6 +236,19 @@ class MainWindow(QMainWindow):
         self.search_count.setObjectName("muted")
         header.addWidget(self.search_count)
 
+        self.history_button = _icon_button(
+            "📚",
+            "Session library & global search  (Ctrl+H)",
+            checkable=True,
+        )
+        self.history_button.toggled.connect(self._toggle_sidebar)
+        header.addWidget(self.history_button)
+        self.open_file_button = _icon_button(
+            "📂",
+            "Transcribe an audio/video file  (Ctrl+O or drag & drop)",
+        )
+        self.open_file_button.clicked.connect(self._open_media_file)
+        header.addWidget(self.open_file_button)
         self.overlay_button = _icon_button(
             "💬",
             "Floating live captions overlay  (Ctrl+Shift+O)",
@@ -303,6 +343,35 @@ class MainWindow(QMainWindow):
         grid.setColumnStretch(2, 2)
         drawer.hide()
         return drawer
+
+    def _build_sidebar(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("sidebar")
+        panel.setFixedWidth(250)
+        box = QVBoxLayout(panel)
+        box.setContentsMargins(10, 10, 10, 10)
+        box.setSpacing(8)
+        top = QHBoxLayout()
+        label = QLabel("SESSION LIBRARY")
+        label.setObjectName("sectionTitle")
+        top.addWidget(label)
+        top.addStretch(1)
+        box.addLayout(top)
+
+        self.library_search = QLineEdit()
+        self.library_search.setPlaceholderText("🔎 Search all sessions…")
+        self.library_search.setClearButtonEnabled(True)
+        self.library_search.textChanged.connect(self._refresh_sidebar)
+        box.addWidget(self.library_search)
+
+        self.session_list = QListWidget()
+        self.session_list.setObjectName("sessionList")
+        self.session_list.itemClicked.connect(self._on_session_item_clicked)
+        self.session_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.session_list.customContextMenuRequested.connect(self._sidebar_menu)
+        box.addWidget(self.session_list, stretch=1)
+        panel.hide()
+        return panel
 
     def _build_transcript_card(self) -> QFrame:
         card = QFrame()
@@ -496,6 +565,8 @@ class MainWindow(QMainWindow):
             "Ctrl+E": self._export,
             "Ctrl+B": self._star_last,
             "Ctrl+N": self._new_transcript,
+            "Ctrl+O": self._open_media_file,
+            "Ctrl+H": self.history_button.toggle,
             "Ctrl+Shift+C": self._copy_last,
             "Ctrl+Shift+O": self.overlay_button.toggle,
             "Ctrl+,": self.settings_button.toggle,
@@ -668,6 +739,7 @@ class MainWindow(QMainWindow):
             self.threshold,
             self.vocabulary,
             self.new_session_button,
+            self.open_file_button,
         ):
             widget.setEnabled(enabled)
 
@@ -696,7 +768,7 @@ class MainWindow(QMainWindow):
 
     def _tick(self) -> None:
         """60 ms UI heartbeat: level meter, clock, blinking REC dot."""
-        segmenter = self.session.segmenter if self.session else None
+        segmenter = getattr(self.session, "segmenter", None) if self.session else None
         if segmenter is not None and self.is_recording:
             level = segmenter.level
             self.level_meter.push(level, level >= segmenter.effective_threshold)
@@ -739,12 +811,20 @@ class MainWindow(QMainWindow):
             self._timeline_origin = monotonic()
 
         language = str(self.language.currentData())
+        source_code = str(self.audio_source.currentData())
+        model_code = str(self.model.currentData())
+        if self.current_session_id is None:
+            self.current_session_id = self.library.create_session(
+                source=source_code,
+                model=model_code,
+                language=language,
+            )
         self.session = Session(
             self.signals,
-            str(self.model.currentData()),
+            model_code,
             self.threshold.value(),
             self.vocabulary.text(),
-            audio_source=str(self.audio_source.currentData()),
+            audio_source=source_code,
             sessions_dir=self.sessions_dir,
             language=None if language == "auto" else language,
             device=str(self.device.currentData()),
@@ -866,6 +946,15 @@ class MainWindow(QMainWindow):
                 speaker=speaker,
             )
             self.entries.append(entry)
+            if self.current_session_id is None:
+                self.current_session_id = self.library.create_session(
+                    source=str(self.audio_source.currentData()),
+                    model=str(self.model.currentData()),
+                    language=str(self.language.currentData()),
+                )
+            self.library.add_entry(self.current_session_id, entry)
+            if self.sidebar.isVisible():
+                self._refresh_sidebar()
             self.last_block = f"[{when}] {content}"
             hits = find_keywords(content, self.keywords)
             self.transcript.add_fragments(
@@ -902,10 +991,10 @@ class MainWindow(QMainWindow):
 
     def _refresh_metrics(self) -> None:
         if not self.latest_metrics:
-            if self.session:
-                pending = (
-                    self.session.engine.pending_seconds()
-                    + self.session.engine.capture_pending
+            engine = getattr(self.session, "engine", None)
+            if engine is not None and hasattr(engine, "pending_seconds"):
+                pending = engine.pending_seconds() + getattr(
+                    engine, "capture_pending", 0.0
                 )
                 self.diagnostics.setText(
                     f"Waiting for first inference · Pending ≈{pending:.1f}s"
@@ -913,16 +1002,14 @@ class MainWindow(QMainWindow):
             return
         m = self.latest_metrics
         pending = m["pending"]
-        if self.session:
-            pending = (
-                self.session.engine.pending_seconds()
-                + self.session.engine.capture_pending
-            )
+        engine = getattr(self.session, "engine", None)
+        if engine is not None and hasattr(engine, "pending_seconds"):
+            pending = engine.pending_seconds() + getattr(engine, "capture_pending", 0.0)
         warning = (
             " · BACKLOG: try a faster model" if m["rtf"] > 1 or pending > 16 else ""
         )
         running = ""
-        started = self.session.engine.inference_started if self.session else None
+        started = getattr(engine, "inference_started", None) if engine else None
         if started is not None:
             running = f" · Active inference: {monotonic() - started:.1f}s"
         detail = (
@@ -981,6 +1068,8 @@ class MainWindow(QMainWindow):
             old.speaker,
         )
         self.entries[index] = entry
+        if self.current_session_id is not None:
+            self.library.set_starred(self.current_session_id, index, entry.starred)
         hits = find_keywords(entry.text, self.keywords)
         self.transcript.replace_block(
             index,
@@ -1056,6 +1145,7 @@ class MainWindow(QMainWindow):
         self.live.update_text("")
         self.recent = RecentTranscript()
         self.last_block = ""
+        self.current_session_id = None
         self._timeline_origin = None
         self._timeline_end = 0.0
         self._session_offset = 0.0
@@ -1182,6 +1272,164 @@ class MainWindow(QMainWindow):
             self._set_status(
                 f"Transcript exported successfully (.{fmt}) → {target.name}"
             )
+
+    # --- Session library & file transcription ---------------------------
+
+    def _toggle_sidebar(self, visible: bool) -> None:
+        self.sidebar.setVisible(visible)
+        if visible:
+            self._refresh_sidebar()
+
+    def _refresh_sidebar(self, *_args) -> None:
+        query = (
+            self.library_search.text().strip()
+            if hasattr(self, "library_search")
+            else ""
+        )
+        sessions = self.library.list_sessions(query=query)
+        self.session_list.clear()
+        for item in sessions:
+            label = f"{item.title}\n{item.started_at} · {item.entry_count} blocks"
+            widget_item = QListWidgetItem(label)
+            widget_item.setData(Qt.ItemDataRole.UserRole, item.id)
+            widget_item.setToolTip(
+                f"{item.title} ({item.started_at} · {item.model} · {item.source})"
+            )
+            self.session_list.addItem(widget_item)
+
+    def _on_session_item_clicked(self, item: QListWidgetItem) -> None:
+        session_id = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(session_id, int):
+            self.load_saved_session(session_id)
+
+    def load_saved_session(self, session_id: int) -> None:
+        if self.is_recording or self.is_stopping:
+            self._set_status("Stop the current session before loading another one.")
+            return
+        loaded = self.library.load_entries(session_id)
+        self.current_session_id = session_id
+        self.entries = list(loaded)
+        self.transcript.clear_entries()
+        self._rerender_transcript()
+        self.last_block = (
+            f"[{self.entries[-1].timestamp}] {self.entries[-1].text}"
+            if self.entries
+            else ""
+        )
+        self._timeline_end = self.entries[-1].end_seconds if self.entries else 0.0
+        self._session_offset = self._timeline_end
+        self._update_entry_count()
+        self._set_status(f"Loaded session #{session_id} ({len(self.entries)} blocks).")
+
+    def _sidebar_menu(self, pos) -> None:
+        item = self.session_list.itemAt(pos)
+        if item is None:
+            return
+        session_id = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(session_id, int):
+            return
+        menu = QMenu(self)
+        menu.addAction("Open session", lambda: self.load_saved_session(session_id))
+        menu.addAction("Delete session", lambda: self._delete_saved_session(session_id))
+        menu.exec(self.session_list.viewport().mapToGlobal(pos))
+
+    def _delete_saved_session(self, session_id: int) -> None:
+        self.library.delete_session(session_id)
+        if self.current_session_id == session_id:
+            self.current_session_id = None
+        self._refresh_sidebar()
+        self._set_status("Session deleted from library.")
+
+    def _open_media_file(self) -> None:
+        if self.is_recording or self.is_stopping:
+            self._set_status("Stop the current session before transcribing a file.")
+            return
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Transcribe Audio or Video File",
+            str(Path.home()),
+            MEDIA_FILE_FILTER,
+        )
+        if filename:
+            self.transcribe_file(Path(filename))
+
+    def transcribe_file(self, media_path: Path) -> None:
+        if self.is_recording or self.is_stopping:
+            self._set_status("Stop the current session before transcribing a file.")
+            return
+        path = Path(media_path)
+        if path.suffix.lower() not in SUPPORTED_MEDIA_EXTENSIONS:
+            self._set_status(f"Unsupported file format: {path.suffix}")
+            return
+
+        self.signals = Signals(self)
+        self.signals.status.connect(self._set_status)
+        self.signals.final.connect(self._on_final)
+        self.signals.warning.connect(self._set_status)
+        self.signals.error.connect(self._on_error)
+        self.signals.finished.connect(self._on_finished)
+        self.signals.metrics.connect(self._on_metrics)
+
+        self.last_completed_id = 0
+        self.latest_partial_id = 0
+        self.recent = RecentTranscript()
+        self.latest_metrics = None
+        self._session_offset = self._timeline_end
+        if self._timeline_origin is None:
+            self._timeline_origin = monotonic()
+
+        language = str(self.language.currentData())
+        model_code = str(self.model.currentData())
+        self.current_session_id = self.library.create_session(
+            title=f"📂 {path.name}",
+            source="file",
+            model=model_code,
+            language=language,
+        )
+        backup = SessionBackupWriter(sessions_dir=self.sessions_dir)
+        self.session = FileTranscriptionJob(
+            path,
+            self.signals,
+            model_code,
+            self.vocabulary.text(),
+            language=None if language == "auto" else language,
+            device=str(self.device.currentData()),
+            on_final=backup.append,
+        )
+        self._set_controls_enabled(False)
+        self.is_recording = True
+        self._set_recording_visuals(True)
+        self.state_label.setText("Transcribing file")
+        self.device_label.setText(path.name)
+        self.clock.start()
+        self.live.update_text("")
+        self._last_error = None
+        self.session.start()
+
+    def dragEnterEvent(self, event) -> None:
+        mime = event.mimeData()
+        if mime.hasUrls():
+            for url in mime.urls():
+                if (
+                    url.isLocalFile()
+                    and Path(url.toLocalFile()).suffix.lower()
+                    in SUPPORTED_MEDIA_EXTENSIONS
+                ):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dropEvent(self, event) -> None:
+        mime = event.mimeData()
+        if not mime.hasUrls():
+            return
+        for url in mime.urls():
+            if url.isLocalFile():
+                candidate = Path(url.toLocalFile())
+                if candidate.suffix.lower() in SUPPORTED_MEDIA_EXTENSIONS:
+                    event.acceptProposedAction()
+                    self.transcribe_file(candidate)
+                    return
 
     # ------------------------------------------------------------------
 

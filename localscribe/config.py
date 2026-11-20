@@ -32,6 +32,7 @@ DATA_DIR = user_data_dir()
 DEFAULT_CONFIG_PATH = DATA_DIR / "config.json"
 DEFAULT_SESSIONS_DIR = DATA_DIR / "sessions"
 DEFAULT_LOGS_DIR = DATA_DIR / "logs"
+DEFAULT_DB_PATH = DATA_DIR / "library.db"
 LEGACY_CONFIG_PATH = PROJECT_DIR / "config.json"
 
 VALID_MODELS = ("tiny", "base", "small", "large-v3-turbo")

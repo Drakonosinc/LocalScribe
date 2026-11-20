@@ -21,11 +21,13 @@ from PySide6.QtWidgets import QApplication
 from localscribe.audio import TARGET_RATE
 from localscribe.config import AppConfig, load_config, save_config
 from localscribe.pipeline import (
+    FileTranscriptionJob,
     RecognitionEngine,
     Segmenter,
     clean_segments,
     is_hallucination,
 )
+from localscribe.storage import SessionLibrary
 from localscribe.transcript import TranscriptEntry, format_json, format_vtt
 from localscribe.ui import MainWindow
 from localscribe.widgets import entry_fragments, find_keywords, parse_keywords
@@ -338,4 +340,101 @@ def test_caption_overlay_and_speaker_attribution(qapp, tmp_path: Path):
     win.overlay_button.setChecked(False)
     assert not win.caption_overlay.isVisible()
     win.session = None
+    win.close()
+
+
+def test_sqlite_session_library_and_fts_search(tmp_path: Path):
+    lib = SessionLibrary(tmp_path / "library.db")
+    s1 = lib.create_session(source="system", model="base", language="es")
+    lib.add_entry(
+        s1,
+        TranscriptEntry(
+            "10:00:01",
+            "Revisión de arquitectura con Kubernetes y FastAPI",
+            0.0,
+            3.5,
+            speaker="system",
+        ),
+    )
+    lib.add_entry(
+        s1,
+        TranscriptEntry("10:00:08", "Despliegue en contenedores Docker", 4.0, 6.2),
+    )
+    lib.set_starred(s1, 1, True)
+
+    s2 = lib.create_session(source="mic", model="tiny", language="es")
+    lib.add_entry(
+        s2,
+        TranscriptEntry("11:00:00", "Reunión de presupuesto anual", 0.0, 2.0),
+    )
+
+    all_sessions = lib.list_sessions()
+    assert [s.id for s in all_sessions] == [s2, s1]
+    assert "Revisión de arquitectura" in all_sessions[1].title
+
+    hits = lib.list_sessions(query="Kubernetes")
+    assert [s.id for s in hits] == [s1]
+
+    loaded = lib.load_entries(s1)
+    assert len(loaded) == 2
+    assert loaded[1].starred is True
+    assert loaded[0].speaker == "system"
+
+    lib.delete_session(s2)
+    assert [s.id for s in lib.list_sessions()] == [s1]
+
+
+def test_file_transcription_job_and_sidebar_reload(qapp, tmp_path: Path):
+    media_file = tmp_path / "sample.mp3"
+    media_file.write_bytes(b"fake-audio-header")
+
+    class FakeModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, path, **kwargs):
+            segs = [
+                SimpleNamespace(text=" Primera línea del archivo.", start=0.0, end=2.4),
+                SimpleNamespace(text="Thanks for watching!", start=2.5, end=4.0),
+                SimpleNamespace(text=" Segunda línea confirmada.", start=4.5, end=7.0),
+            ]
+            return iter(segs), SimpleNamespace(language="es", language_probability=0.95)
+
+    out = _signals()
+    out.finished = _Recorder()
+    saved = []
+    job = FileTranscriptionJob(
+        media_file,
+        out,
+        "tiny",
+        language="es",
+        device="cpu",
+        on_final=lambda w, t: saved.append((w, t)),
+    )
+    with patch("faster_whisper.WhisperModel", FakeModel):
+        job.start()
+        job.join(5)
+    assert len(out.final.values) == 2
+    assert out.final.values[0] == (
+        1,
+        "Primera línea del archivo.",
+        "00:00:00",
+        1,
+        0.0,
+        2.4,
+    )
+    assert out.final.values[1][1] == "Segunda línea confirmada."
+    assert len(saved) == 2
+
+    win = MainWindow(config_path=tmp_path / "config.json")
+    win._on_final(1, "Guardado en biblioteca SQLite", "12:00:00", 1, 0.0, 2.0)
+    sid = win.current_session_id
+    assert sid is not None
+    win.history_button.setChecked(True)
+    assert win.session_list.count() == 1
+    win.entries.clear()
+    win.transcript.clear_entries()
+    win.load_saved_session(sid)
+    assert len(win.entries) == 1
+    assert "Guardado en biblioteca SQLite" in win.transcript.toPlainText()
     win.close()

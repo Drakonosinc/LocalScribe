@@ -106,8 +106,18 @@ def stylesheet(p: Palette) -> str:
         color: {p.muted}; font-size: 8pt; font-weight: 700; letter-spacing: 1px;
     }}
 
-    QFrame#card, QFrame#drawer, QFrame#controlBar {{
+    QFrame#card, QFrame#drawer, QFrame#controlBar, QFrame#sidebar {{
         background: {p.surface}; border: 1px solid {p.border}; border-radius: 14px;
+    }}
+    QListWidget#sessionList {{
+        background: transparent; border: none; color: {p.text}; outline: none;
+    }}
+    QListWidget#sessionList::item {{
+        padding: 8px 10px; border-radius: 9px; margin: 2px 4px;
+    }}
+    QListWidget#sessionList::item:hover {{ background: {p.surface2}; }}
+    QListWidget#sessionList::item:selected {{
+        background: {p.accent_soft}; color: {p.text};
     }}
     QFrame#liveCard {{
         background: {p.live_bg}; border: 1px solid {p.live_border}; border-radius: 14px;
