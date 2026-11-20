@@ -92,11 +92,14 @@ class AudioCapture(threading.Thread):
         self.dropped_seconds = 0.0
         self._full_warning_sent = False
 
-    def _enqueue(self, mono: np.ndarray, captured_end: float) -> None:
+    def _enqueue(
+        self, mono: np.ndarray, captured_end: float, speaker: str = ""
+    ) -> None:
         if mono.size == 0:
             return
+        packet = (mono, captured_end, speaker) if speaker else (mono, captured_end)
         try:
-            self.audio_queue.put_nowait((mono, captured_end))
+            self.audio_queue.put_nowait(packet)
             if (
                 self.audio_queue.maxsize > 0
                 and self.audio_queue.qsize() < self.audio_queue.maxsize // 2
@@ -257,14 +260,40 @@ class AudioCapture(threading.Thread):
                     sys_buf = sys_buf[take_sys:]
                     mic_buf = mic_buf[take_mic:]
                     mixed = mix_audio_chunks(sys_part, mic_part)
-                    self._enqueue(mixed, time.monotonic())
+                    sys_rms = (
+                        float(np.sqrt(np.mean(np.square(sys_part, dtype=np.float64))))
+                        if sys_part is not None and sys_part.size
+                        else 0.0
+                    )
+                    mic_rms = (
+                        float(np.sqrt(np.mean(np.square(mic_part, dtype=np.float64))))
+                        if mic_part is not None and mic_part.size
+                        else 0.0
+                    )
+                    speaker = "mic" if mic_rms >= sys_rms * 1.1 else "system"
+                    self._enqueue(mixed, time.monotonic(), speaker=speaker)
 
             sys_thread.join(timeout=1.5)
             mic_thread.join(timeout=1.5)
             sys_buf = drain(sys_q, sys_buf)
             mic_buf = drain(mic_q, mic_buf)
             if sys_buf.size or mic_buf.size:
-                self._enqueue(mix_audio_chunks(sys_buf, mic_buf), time.monotonic())
+                sys_rms = (
+                    float(np.sqrt(np.mean(np.square(sys_buf, dtype=np.float64))))
+                    if sys_buf.size
+                    else 0.0
+                )
+                mic_rms = (
+                    float(np.sqrt(np.mean(np.square(mic_buf, dtype=np.float64))))
+                    if mic_buf.size
+                    else 0.0
+                )
+                speaker = "mic" if mic_rms >= sys_rms * 1.1 else "system"
+                self._enqueue(
+                    mix_audio_chunks(sys_buf, mic_buf),
+                    time.monotonic(),
+                    speaker=speaker,
+                )
 
         if reader_errors:
             raise reader_errors[0]

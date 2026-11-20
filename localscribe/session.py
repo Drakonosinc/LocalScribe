@@ -13,14 +13,15 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from .audio import AUDIO_SOURCE_SYSTEM, AudioCapture
+from .config import DEFAULT_LOGS_DIR, DEFAULT_SESSIONS_DIR
 from .pipeline import RecognitionEngine, Segmenter
 
-DEFAULT_SESSIONS_DIR = Path(__file__).resolve().parent.parent / "sessions"
+__all__ = ["DEFAULT_SESSIONS_DIR", "Session", "SessionBackupWriter", "Signals"]
 
 
 class Signals(QObject):
     partial = Signal(int, str, int)
-    final = Signal(int, str, str, int)
+    final = Signal(int, str, str, int, float, float)
     metrics = Signal(dict)
     status = Signal(str)
     device = Signal(str)
@@ -78,6 +79,8 @@ class Session:
         initial_prompt: str = "",
         audio_source: str = AUDIO_SOURCE_SYSTEM,
         sessions_dir: Path | None = None,
+        language: str | None = None,
+        device: str = "auto",
     ):
         self.signals = signals
         self.audio_source = audio_source
@@ -91,6 +94,8 @@ class Session:
             model_name,
             initial_prompt,
             on_final=self._record_final,
+            language=language,
+            device=device,
         )
         self.capture = AudioCapture(
             self.audio_queue, self.capture_stop, signals, source=audio_source
@@ -118,8 +123,8 @@ class Session:
         logger = logging.getLogger("localscribe")
         if not logger.handlers:
             try:
-                folder = Path(__file__).resolve().parent.parent / "logs"
-                folder.mkdir(exist_ok=True)
+                folder = DEFAULT_LOGS_DIR
+                folder.mkdir(parents=True, exist_ok=True)
                 handler = RotatingFileHandler(
                     folder / "diagnostics.log",
                     maxBytes=1_000_000,

@@ -107,7 +107,7 @@ def test_main_window_persists_and_restores_config(qapp, tmp_path: Path):
     assert win1.windowTitle() == "LocalScribe — Live Transcriber"
     title_label = win1.findChild(QLabel, "title")
     assert title_label is not None
-    assert title_label.text() == "LOCALSCRIBE"
+    assert title_label.text() == "LocalScribe"
     assert "Docker, Kubernetes, FastAPI, PyTorch" in win1.vocabulary.placeholderText()
 
     win1.model.setCurrentIndex(win1.model.findData("tiny"))

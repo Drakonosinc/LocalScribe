@@ -99,7 +99,9 @@ class EngineTests(unittest.TestCase):
             engine.join(5)
         self.assertFalse(engine.is_alive())
         self.assertFalse(output.error.values)
-        self.assertEqual(output.final.values, [(1, "sample text", "12:00", 1)])
+        self.assertEqual(
+            output.final.values, [(1, "sample text", "12:00", 1, 0.0, 1.0)]
+        )
         self.assertEqual(calls[1]["initial_prompt"], "Kubernetes")
         self.assertEqual(output.metrics.values[0][0]["audio"], 1)
 
